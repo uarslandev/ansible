@@ -85,6 +85,24 @@
     mode: '0644'
 
 # ==============================================================================
+# Oh-My-Zsh & Powerlevel10k Automation
+# ==============================================================================
+
+- name: Clone Oh-My-Zsh repository
+  ansible.builtin.git:
+    repo: 'https://github.com/ohmyzsh/ohmyzsh.git'
+    dest: "{{ user_home }}/.oh-my-zsh"
+    depth: 1
+    update: false
+
+- name: Clone Powerlevel10k theme for Oh-My-Zsh
+  ansible.builtin.git:
+    repo: 'https://github.com/romkatv/powerlevel10k.git'
+    dest: "{{ user_home }}/.oh-my-zsh/custom/themes/powerlevel10k"
+    depth: 1
+    update: false
+
+# ==============================================================================
 # Restore GNOME Settings (Theme, Keybindings, Dock, Touchpad)
 # ==============================================================================
 
