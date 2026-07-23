@@ -5,8 +5,21 @@
     name: "{{ dnf_packages }}"
     state: present
 
+- name: Remove explicitly marked packages via DNF
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ absent_packages }}"
+    state: absent
+  when: absent_packages is defined and absent_packages | length > 0
+
 - name: Install Desktop Applications via Flatpak
   community.general.flatpak:
     name: "{{ flatpak_apps }}"
     state: present
     remote: flathub
+
+- name: Remove explicitly marked Flatpak applications
+  community.general.flatpak:
+    name: "{{ absent_flatpak_apps }}"
+    state: absent
+  when: absent_flatpak_apps is defined and absent_flatpak_apps | length > 0
