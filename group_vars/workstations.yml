@@ -4,6 +4,8 @@ dnf_packages:
   - neovim
   - tmux
   - zsh
+  - zsh-autosuggestions
+  - zsh-syntax-highlighting
   - git
   - curl
   - wget
@@ -23,6 +25,7 @@ dnf_packages:
   - npm
   - util-linux-user
   - chezmoi
+  - dconf
 
 # Desktop GUI Applications installed via Flatpak
 flatpak_apps:
@@ -37,3 +40,4 @@ devops_tool_versions:
   k9s: "v0.32.5"
   terraform: "1.9.6"
   kind: "v0.24.0"
+  starship: "v1.21.1"

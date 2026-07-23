@@ -83,3 +83,18 @@
     content: "{{ flatpak_apps | to_nice_json }}"
     dest: "{{ user_home }}/.local/share/ansible_managed_flatpaks.json"
     mode: '0644'
+
+# ==============================================================================
+# Restore GNOME Settings (Theme, Keybindings, Dock, Touchpad)
+# ==============================================================================
+
+- name: Check if GNOME dconf settings dump exists
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.config/dconf/settings.dconf"
+  register: dconf_dump_stat
+
+- name: Restore GNOME settings via dconf
+  ansible.builtin.shell:
+    cmd: "dconf load / < {{ user_home }}/.config/dconf/settings.dconf"
+  when: dconf_dump_stat.stat.exists
+  changed_when: false
