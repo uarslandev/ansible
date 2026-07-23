@@ -97,4 +97,5 @@
   ansible.builtin.shell:
     cmd: "dconf load / < {{ user_home }}/.config/dconf/settings.dconf"
   when: dconf_dump_stat.stat.exists
+  failed_when: false
   changed_when: false
