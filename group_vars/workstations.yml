@@ -19,11 +19,11 @@ dnf_packages:
   - gcc
   - make
   - python3-pip
-  - golang
   - nodejs
   - npm
   - util-linux-user
   - chezmoi
+
 
 
 # Desktop GUI Applications installed via Flatpak
