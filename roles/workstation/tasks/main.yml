@@ -5,8 +5,21 @@
     name: "{{ dnf_packages }}"
     state: present
 
+- name: Remove unwanted system packages via DNF
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ unwanted_packages }}"
+    state: absent
+  when: unwanted_packages is defined and unwanted_packages | length > 0
+
 - name: Install Desktop Applications via Flatpak
   community.general.flatpak:
     name: "{{ flatpak_apps }}"
     state: present
     remote: flathub
+
+- name: Remove unwanted Flatpak applications
+  community.general.flatpak:
+    name: "{{ unwanted_flatpak_apps }}"
+    state: absent
+  when: unwanted_flatpak_apps is defined and unwanted_flatpak_apps | length > 0

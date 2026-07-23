@@ -24,13 +24,17 @@ dnf_packages:
   - util-linux-user
   - chezmoi
 
-
+# Optional list of DNF packages to explicitly remove/uninstall
+unwanted_packages: []
 
 # Desktop GUI Applications installed via Flatpak
 flatpak_apps:
   - dev.vencord.Vesktop
   - com.spotify.Client
   - md.obsidian.Obsidian
+
+# Optional list of Flatpaks to explicitly remove/uninstall
+unwanted_flatpak_apps: []
 
 # Versions for standalone DevOps tools
 devops_tool_versions:
