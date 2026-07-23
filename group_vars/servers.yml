@@ -1,0 +1,9 @@
+---
+# Server-specific variables (for home server, cloud nodes, VPS)
+server_packages:
+  - curl
+  - wget
+  - htop
+  - git
+  - ufw
+  - fail2ban

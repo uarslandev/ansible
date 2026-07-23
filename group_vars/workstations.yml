@@ -1,0 +1,37 @@
+---
+# Packages installed via DNF on Fedora Workstations
+dnf_packages:
+  - neovim
+  - tmux
+  - zsh
+  - git
+  - curl
+  - wget
+  - htop
+  - btop
+  - fastfetch
+  - ripgrep
+  - fd-find
+  - fzf
+  - jq
+  - unzip
+  - tar
+  - gcc
+  - make
+  - python3-pip
+  - util-linux-user
+  - chezmoi
+
+# Desktop GUI Applications installed via Flatpak
+flatpak_apps:
+  - dev.vencord.Vesktop
+  - com.spotify.Client
+  - md.obsidian.Obsidian
+
+# Versions for standalone DevOps tools
+devops_tool_versions:
+  kubectl: "v1.31.1"
+  helm: "v3.16.1"
+  k9s: "v0.32.5"
+  terraform: "1.9.6"
+  kind: "v0.24.0"

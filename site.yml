@@ -1,0 +1,31 @@
+---
+# ==============================================================================
+# Master Infrastructure Playbook
+# ==============================================================================
+
+# 1. Base Setup (Runs on ALL machines: Workstations & Servers)
+- name: Apply Common Base Infrastructure Setup
+  hosts: all
+  roles:
+    - role: common
+      tags: [common, base]
+
+# 2. Developer Workstation Setup (Runs on Fedora Workstation & Laptops)
+- name: Provision Developer Workstation Environment
+  hosts: workstations
+  roles:
+    - role: workstation
+      tags: [workstation, packages]
+    - role: devops_tools
+      tags: [devops, k8s, terraform]
+    - role: dotfiles
+      tags: [dotfiles, chezmoi]
+
+# 3. Server Node Setup (Placeholder for future Home Server / VPS nodes)
+- name: Provision Server Nodes
+  hosts: servers
+  tags: [server]
+  tasks:
+    - name: Server placeholder task
+      ansible.builtin.debug:
+        msg: "Server configuration play will execute here when servers are added to inventory.ini"

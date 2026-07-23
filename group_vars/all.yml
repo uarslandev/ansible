@@ -1,0 +1,11 @@
+---
+# Shared variables across all hosts (Workstations and Servers)
+target_user: "{{ ansible_facts['env']['USER'] | default(ansible_facts['user_id'] | default('user')) }}"
+user_home: "/home/{{ target_user }}"
+user_bin: "{{ user_home }}/.local/bin"
+
+
+# Chezmoi Dotfiles Repository URL
+dotfiles_repo: "https://github.com/uarslandev/dotfiles.git"
+
+

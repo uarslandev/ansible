@@ -1,0 +1,12 @@
+---
+- name: Install workstation CLI packages via DNF
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ dnf_packages }}"
+    state: present
+
+- name: Install Desktop Applications via Flatpak
+  community.general.flatpak:
+    name: "{{ flatpak_apps }}"
+    state: present
+    remote: flathub

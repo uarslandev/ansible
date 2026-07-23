@@ -1,0 +1,14 @@
+---
+- name: Ensure Neovim config directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/nvim"
+    state: directory
+    mode: '0755'
+
+- name: Initialize Chezmoi with dotfiles repository if defined
+  ansible.builtin.command:
+    cmd: "chezmoi init --apply {{ dotfiles_repo }}"
+  when: dotfiles_repo is defined and dotfiles_repo | length > 0
+  register: chezmoi_init_result
+  changed_when: chezmoi_init_result.rc == 0
+  failed_when: false
