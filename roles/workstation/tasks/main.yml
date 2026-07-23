@@ -1,16 +1,76 @@
 ---
-- name: Install workstation CLI packages via DNF
+# ==============================================================================
+# Automatic Package Pruning (Auto-uninstall when removed from dnf_packages)
+# ==============================================================================
+
+# 1. Read previously managed DNF package manifest if it exists
+- name: Check for previously managed DNF package manifest
+  ansible.builtin.stat:
+    path: /var/lib/ansible_managed_dnf_packages.json
+  register: dnf_manifest_stat
+
+- name: Read previous DNF package manifest
+  ansible.builtin.slurp:
+    src: /var/lib/ansible_managed_dnf_packages.json
+  register: previous_dnf_manifest_raw
+  when: dnf_manifest_stat.stat.exists
+
+- name: Set previous DNF package list
+  ansible.builtin.set_fact:
+    previous_dnf_packages: "{{ (previous_dnf_manifest_raw.content | b64decode | from_json) if dnf_manifest_stat.stat.exists else [] }}"
+
+- name: Calculate DNF packages to auto-remove
+  ansible.builtin.set_fact:
+    dnf_packages_to_remove: "{{ previous_dnf_packages | difference(dnf_packages) }}"
+
+- name: Auto-remove DNF packages no longer listed in dnf_packages
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ dnf_packages_to_remove }}"
+    state: absent
+  when: dnf_packages_to_remove | length > 0
+
+- name: Install current DNF packages
   become: true
   ansible.builtin.dnf:
     name: "{{ dnf_packages }}"
     state: present
 
-- name: Remove explicitly marked packages via DNF
+- name: Save updated DNF package manifest
   become: true
-  ansible.builtin.dnf:
-    name: "{{ absent_packages }}"
+  ansible.builtin.copy:
+    content: "{{ dnf_packages | to_nice_json }}"
+    dest: /var/lib/ansible_managed_dnf_packages.json
+    mode: '0644'
+
+# ==============================================================================
+# Automatic Flatpak Pruning (Auto-uninstall when removed from flatpak_apps)
+# ==============================================================================
+
+- name: Check for previously managed Flatpak manifest
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.local/share/ansible_managed_flatpaks.json"
+  register: flatpak_manifest_stat
+
+- name: Read previous Flatpak manifest
+  ansible.builtin.slurp:
+    src: "{{ user_home }}/.local/share/ansible_managed_flatpaks.json"
+  register: previous_flatpak_manifest_raw
+  when: flatpak_manifest_stat.stat.exists
+
+- name: Set previous Flatpak list
+  ansible.builtin.set_fact:
+    previous_flatpak_apps: "{{ (previous_flatpak_manifest_raw.content | b64decode | from_json) if flatpak_manifest_stat.stat.exists else [] }}"
+
+- name: Calculate Flatpaks to auto-remove
+  ansible.builtin.set_fact:
+    flatpaks_to_remove: "{{ previous_flatpak_apps | difference(flatpak_apps) }}"
+
+- name: Auto-remove Flatpak applications no longer listed in flatpak_apps
+  community.general.flatpak:
+    name: "{{ flatpaks_to_remove }}"
     state: absent
-  when: absent_packages is defined and absent_packages | length > 0
+  when: flatpaks_to_remove | length > 0
 
 - name: Install Desktop Applications via Flatpak
   community.general.flatpak:
@@ -18,8 +78,8 @@
     state: present
     remote: flathub
 
-- name: Remove explicitly marked Flatpak applications
-  community.general.flatpak:
-    name: "{{ absent_flatpak_apps }}"
-    state: absent
-  when: absent_flatpak_apps is defined and absent_flatpak_apps | length > 0
+- name: Save updated Flatpak manifest
+  ansible.builtin.copy:
+    content: "{{ flatpak_apps | to_nice_json }}"
+    dest: "{{ user_home }}/.local/share/ansible_managed_flatpaks.json"
+    mode: '0644'

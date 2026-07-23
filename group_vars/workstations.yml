@@ -24,17 +24,11 @@ dnf_packages:
   - util-linux-user
   - chezmoi
 
-# DNF packages Ansible should actively UNINSTALL across your machines
-absent_packages: []
-
 # Desktop GUI Applications installed via Flatpak
 flatpak_apps:
   - dev.vencord.Vesktop
   - com.spotify.Client
   - md.obsidian.Obsidian
-
-# Flatpak applications Ansible should actively UNINSTALL across your machines
-absent_flatpak_apps: []
 
 # Versions for standalone DevOps tools
 devops_tool_versions:
