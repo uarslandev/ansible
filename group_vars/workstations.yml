@@ -3,11 +3,6 @@
 dnf_packages:
   - neovim
   - tmux
-  - kdenlive
-  - vlc-plugins-all
-  - vlc
-  - gimp
-  - darktable
   - zsh
   - zsh-autosuggestions
   - zsh-syntax-highlighting
@@ -31,6 +26,16 @@ dnf_packages:
   - util-linux-user
   - chezmoi
   - dconf
+
+# Media Codecs & Video Players (HEVC / H.265 / H.264 Support)
+  - vlc
+  - vlc-plugins-freeworld
+  - ffmpeg
+  - ffmpeg-libs
+  - libde265
+  - x265
+  - gstreamer1-plugins-bad-freeworld
+  - gstreamer1-plugins-ugly
 
 # Desktop GUI Applications installed via Flatpak
 flatpak_apps:
