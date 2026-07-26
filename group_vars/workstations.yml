@@ -3,6 +3,11 @@
 dnf_packages:
   - neovim
   - tmux
+  - kdenlive
+  - vlc-plugins-all
+  - vlc
+  - gimp
+  - darktable
   - zsh
   - zsh-autosuggestions
   - zsh-syntax-highlighting
