@@ -27,6 +27,10 @@ dnf_packages:
   - chezmoi
   - dconf
 
+# GNOME Management Tools
+  - gnome-tweaks                             # GNOME Tweaks customization app
+  - gnome-shell-extension-prefs              # GNOME Extensions GUI management app
+
 # Media Codecs & Video Players (HEVC / H.265 / H.264 Support)
   - vlc
   - vlc-plugins-freeworld
