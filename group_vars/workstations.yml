@@ -30,6 +30,7 @@ dnf_packages:
 # Media Codecs & Video Players (HEVC / H.265 / H.264 Support)
   - vlc
   - vlc-plugins-freeworld
+  - libavcodec-freeworld
   - ffmpeg
   - ffmpeg-libs
   - libde265
@@ -40,6 +41,7 @@ dnf_packages:
 # Desktop GUI Applications installed via Flatpak
 flatpak_apps:
   - dev.vencord.Vesktop
+  - com.google.Chrome
   - com.spotify.Client
   - md.obsidian.Obsidian
 

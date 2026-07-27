@@ -7,5 +7,3 @@ user_bin: "{{ user_home }}/.local/bin"
 
 # Chezmoi Dotfiles Repository URL
 dotfiles_repo: "https://github.com/uarslandev/dotfiles.git"
-
-
