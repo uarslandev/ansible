@@ -28,6 +28,7 @@
   ansible.builtin.dnf:
     name: "{{ dnf_packages_to_remove }}"
     state: absent
+    allowerasing: true
   when: dnf_packages_to_remove | length > 0
 
 - name: Install current DNF packages
@@ -35,6 +36,7 @@
   ansible.builtin.dnf:
     name: "{{ dnf_packages }}"
     state: present
+    allowerasing: true
 
 - name: Save updated DNF package manifest
   become: true

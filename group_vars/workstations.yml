@@ -2,6 +2,9 @@
 # Packages installed via DNF on Fedora Workstations
 dnf_packages:
   - neovim
+  - gnome-shell-extension-gsconnect
+  - kde-connect
+  - nextcloud-client
   - tmux
   - zsh
   - zsh-autosuggestions
@@ -29,7 +32,7 @@ dnf_packages:
 
 # GNOME Management Tools
   - gnome-tweaks                             # GNOME Tweaks customization app
-  - gnome-shell-extension-prefs              # GNOME Extensions GUI management app
+  - gnome-extensions-app                     # GNOME Extensions GUI management app
 
 # Media Codecs & Video Players (HEVC / H.265 / H.264 Support)
   - vlc
