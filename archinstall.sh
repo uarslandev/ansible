@@ -1,9 +1,122 @@
+#!/usr/bin/env bash
+#
+# Dual-Purpose Script:
+#   1. Run on any existing Arch Linux host to build a custom ZFS Live ISO.
+#   2. Run inside the resulting custom Live ISO to perform the automated Arch + Encrypted ZFS install.
+#
+
+set -euo pipefail
+
+ANSIBLE_REPO="https://github.com/uarslandev/ansible.git"
+
+# ==============================================================================
+# MODE DETECTION
+# ==============================================================================
+if [[ $EUID -ne 0 ]]; then
+   echo "[!] This script must be run as root." 
+   exit 1
+fi
+
+# If ZFS module is loaded (or can be loaded), run the Installer Phase
+if modprobe zfs &>/dev/null; then
+   MODE="INSTALL"
+else
+   MODE="BUILD_ISO"
+fi
+
+# ==============================================================================
+# PHASE 1: BUILD CUSTOM ARCH ZFS LIVE ISO
+# ==============================================================================
+if [[ "$MODE" == "BUILD_ISO" ]]; then
+    echo "======================================================================"
+    echo " ZFS Module not found. Running in ISO BUILD MODE (archiso)."
+    echo "======================================================================"
+
+    # Install build dependencies on host
+    echo "[+] Installing archiso and build tools on host..."
+    pacman -Sy --needed --noconfirm archiso git curl
+
+    WORK_DIR="/tmp/archlive-zfs"
+    OUT_DIR="$HOME/zfs-iso-build"
+
+    rm -rf "$WORK_DIR"
+    mkdir -p "$OUT_DIR"
+
+    echo "[+] Copying archiso releng profile..."
+    cp -r /usr/share/archiso/configs/releng "$WORK_DIR"
+
+    # Configure packages for ArchZFS + LTS Kernel
+    echo "[+] Configuring packages in ISO profile..."
+    sed -i '/^linux$/d' "$WORK_DIR/packages.x86_64"
+    sed -i '/^broadcom-wl$/d' "$WORK_DIR/packages.x86_64"
+    rm -f "$WORK_DIR/airootfs/etc/mkinitcpio.d/linux.preset" || true
+
+    cat << 'EOF' >> "$WORK_DIR/packages.x86_64"
+linux-lts
+linux-lts-headers
+libunwind
+zfs-utils
+zfs-dkms
+git
+ansible
+sudo
+EOF
+
+    # Configure ArchZFS Repository in profile pacman.conf
+    echo "[+] Adding ArchZFS repository to ISO pacman.conf..."
+    cat << 'EOF' >> "$WORK_DIR/pacman.conf"
+
+[archzfs]
+SigLevel = TrustAll Optional
+Server = https://github.com/archzfs/archzfs/releases/download/experimental
+EOF
+
+    # Configure ArchZFS Repository inside live airootfs
+    mkdir -p "$WORK_DIR/airootfs/etc"
+    cp "$WORK_DIR/pacman.conf" "$WORK_DIR/airootfs/etc/pacman.conf"
+
+    # Import ArchZFS Keyring into live environment
+    mkdir -p "$WORK_DIR/airootfs/usr/share/pacman/keyrings"
+    curl -sLo "$WORK_DIR/airootfs/usr/share/pacman/keyrings/archzfs.gpg" \
+        'https://github.com/archzfs/archzfs-keyring/raw/master/keyring/packager/archzfs/3A9917BF0DED5C13F69AC68FABEC0A1208037BE9/3A9917BF0DED5C13F69AC68FABEC0A1208037BE9.asc' || true
+    echo "3A9917BF0DED5C13F69AC68FABEC0A1208037BE9:4:" > "$WORK_DIR/airootfs/usr/share/pacman/keyrings/archzfs-trusted"
+
+    # Update bootloader entries to use linux-lts
+    echo "[+] Updating bootloader configurations to linux-lts..."
+    sed -i -E 's/(vmlinuz|initramfs)-linux/&-lts/g' "$WORK_DIR"/efiboot/loader/entries/*.conf "$WORK_DIR"/syslinux/*.cfg "$WORK_DIR"/grub/*.cfg 2>/dev/null || true
+
+    # Embed THIS script into root's home folder on the ISO for instant installer execution
+    mkdir -p "$WORK_DIR/airootfs/root"
+    cp "$0" "$WORK_DIR/airootfs/root/setup.sh"
+    chmod +x "$WORK_DIR/airootfs/root/setup.sh"
+
+    # Increase live environment tmpfs cowspace for DKMS compilation
+    sed -i 's/cow_spacesize=[^ ]*/cow_spacesize=4G/g' "$WORK_DIR"/efiboot/loader/entries/*.conf "$WORK_DIR"/syslinux/*.cfg "$WORK_DIR"/grub/*.cfg 2>/dev/null || true
+
+    echo "[+] Building custom ArchZFS ISO (this may take a few minutes)..."
+    mkarchiso -v -w "$WORK_DIR/tmp" -o "$OUT_DIR" "$WORK_DIR"
+
+    echo ""
+    echo "======================================================================"
+    echo " SUCCESS! Your custom ISO has been generated in:"
+    echo "    $OUT_DIR"
+    echo ""
+    echo " Burn the ISO to a USB stick, boot your target machine, and simply run:"
+    echo "    ./setup.sh"
+    echo "======================================================================"
+    exit 0
+fi
+
 # ==============================================================================
 # PHASE 2: ARCH LINUX + ENCRYPTED ZFS + ANSIBLE INSTALLER
 # ==============================================================================
 echo "======================================================================"
 echo " ZFS Module Detected! Running in INSTALLATION MODE."
 echo "======================================================================"
+
+# Clean up any leftover mounts/pools from previous failed runs
+umount -R /mnt 2>/dev/null || true
+zpool export -f zroot 2>/dev/null || true
 
 lsblk
 echo ""
@@ -140,8 +253,8 @@ mkdir -p /mnt/etc/zfs
 zpool set cachefile=/etc/zfs/zpool.cache zroot
 cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
 
-echo "[+] Installing minimal base system, Ansible, git, and sudo..."
-pacstrap /mnt base base-devel linux-lts linux-lts-headers firmware-linux libunwind efibootmgr nano networkmanager git ansible sudo
+echo "[+] Installing base system via pacstrap..."
+pacstrap /mnt base base-devel linux-lts linux-lts-headers linux-firmware libunwind efibootmgr nano networkmanager git ansible sudo
 
 genfstab -U -p /mnt >> /mnt/etc/fstab
 
@@ -226,8 +339,7 @@ CHROOT_SCRIPT
 
 echo "[+] Unmounting and exporting zpools..."
 umount /mnt/boot || true
-zfs umount -a
-zfs umount zroot/ROOT/default
+zfs umount -a || true
 zpool export zroot
 
 echo ""
