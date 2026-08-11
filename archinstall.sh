@@ -150,12 +150,15 @@ echo "[+] Compiling ZFS DKMS modules for linux-lts..."
 LTS_VER=$(arch-chroot /mnt pacman -Q linux-lts | awk '{print $2}')
 arch-chroot /mnt dkms install -m zfs -v "$(arch-chroot /mnt pacman -Q zfs-dkms | awk '{print $2}' | cut -d'-' -f1)" -k "${LTS_VER}-lts" || arch-chroot /mnt dkms autoinstall
 
-arch-chroot /mnt systemctl enable NetworkManager zfs.target zfs-import-cache zfs-mount zfs-import.target
+# Enable services using --root from outside chroot to prevent D-Bus warnings
+systemctl --root=/mnt enable NetworkManager zfs.target zfs-import-cache zfs-mount zfs-import.target
 
-# Mkinitcpio Setup
-sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect modconf block zfs filesystems)/' /mnt/etc/mkinitcpio.conf
-sed -i 's/^MODULES=.*/MODULES=(zfs)/' /mnt/etc/mkinitcpio.conf
-arch-chroot /mnt mkinitcpio -p linux-lts
+# Mkinitcpio Setup (Correct Hook sequence and empty MODULES array)
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block zfs filesystems keyboard)/' /mnt/etc/mkinitcpio.conf
+sed -i 's/^MODULES=.*/MODULES=()/' /mnt/etc/mkinitcpio.conf
+
+# Rebuild initramfs directly to ensure non-zero exits don't crash set -e silently
+arch-chroot /mnt mkinitcpio -k "${LTS_VER}-lts" -c /etc/mkinitcpio.conf -g /boot/initramfs-linux-lts.img
 
 # Bootloader Configuration (systemd-boot)
 arch-chroot /mnt bootctl install
