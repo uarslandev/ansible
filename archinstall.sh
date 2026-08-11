@@ -3,79 +3,69 @@ set -euo pipefail
 
 ANSIBLE_REPO="https://github.com/uarslandev/ansible.git"
 
-if [[ $EUID -ne 0 ]]; then
-    echo "[!] Must run as root." && exit 1
-fi
+[[ $EUID -eq 0 ]] || { echo "Run as root."; exit 1; }
 
 echo "======================================================================"
-echo " ARCH LINUX + ENCRYPTED ZFS + ANSIBLE INSTALLER"
+echo " ARCH + ENCRYPTED ZFS INSTALLER"
 echo "======================================================================"
 
-# Clean up any leftover mounts/pools from previous runs
 umount -R /mnt 2>/dev/null || true
 zpool export -f zroot 2>/dev/null || true
 
 lsblk
-echo ""
+echo
 
-read -rp "Enter target disk device (e.g. /dev/nvme0n1 or /dev/sda): " TARGET_DISK
-if [[ ! -b "$TARGET_DISK" ]]; then
-    echo "[!] Invalid block device: $TARGET_DISK" && exit 1
-fi
+read -rp "Target disk: " DISK
+[[ -b "$DISK" ]] || { echo "Invalid disk."; exit 1; }
 
-echo ""
-echo "[DANGER] Entire contents of $TARGET_DISK will be erased!"
-read -rp "Type 'YES' to confirm disk wipe: " CONFIRM
-if [[ "$CONFIRM" != "YES" ]]; then
-    echo "Aborted." && exit 1
-fi
+echo
+echo "WARNING: $DISK WILL BE ERASED."
+read -rp "Type YES to continue: " OK
+[[ "$OK" == "YES" ]] || exit 1
 
-# Function for re-prompting passwords on mismatch
-get_pass() {
-    local p1 p2 prompt="$1"
-    while true; do
-        read -rsp "$prompt: " p1 >&2 && echo "" >&2
-        read -rsp "Confirm $prompt: " p2 >&2 && echo "" >&2
-        if [[ -n "$p1" && "$p1" == "$p2" ]]; then 
-            printf '%s' "$p1"
-            return 0
-        fi
-        echo "[!] Passwords do not match or were empty. Please try again." >&2
+pass() {
+    local a b
+    while :; do
+        read -rsp "$1: " a; echo
+        read -rsp "Confirm: " b; echo
+        [[ -n "$a" && "$a" == "$b" ]] && { printf '%s' "$a"; return; }
+        echo "Passwords do not match."
     done
 }
 
-# Collect Passwords & Configuration
-ZFS_PASSPHRASE=$(get_pass "ZFS Encryption Passphrase")
-NEW_USER=""
-while [[ -z "$NEW_USER" ]]; do
-    read -rp "Enter new username to create: " NEW_USER
-done
-USER_PASS=$(get_pass "Password for $NEW_USER")
-ROOT_PASS=$(get_pass "Root Password")
-read -rp "Enter Hostname [arch-zfs]: " HOST_NAME
-HOST_NAME=${HOST_NAME:-arch-zfs}
+ZFS_PASS=$(pass "ZFS passphrase")
 
-echo "[+] Partitioning $TARGET_DISK..."
-sgdisk --zap-all "$TARGET_DISK" && partprobe "$TARGET_DISK"
-sgdisk -n 1:0:+1G -t 1:ef00 -c 1:EFI "$TARGET_DISK"
-sgdisk -n 2:0:0  -t 2:bf00 -c 2:ZFS "$TARGET_DISK"
-partprobe "$TARGET_DISK"
+read -rp "Username: " USER
+USER_PASS=$(pass "Password for $USER")
+ROOT_PASS=$(pass "Root password")
 
-if [[ "$TARGET_DISK" =~ "nvme" ]]; then
-    EFI_PART="${TARGET_DISK}p1"
-    ZFS_PART="${TARGET_DISK}p2"
+read -rp "Hostname [arch-zfs]: " HOST
+HOST=${HOST:-arch-zfs}
+
+# Partition disk
+sgdisk --zap-all "$DISK"
+partprobe "$DISK"
+
+sgdisk -n 1:0:+1G -t 1:ef00 -c 1:EFI "$DISK"
+sgdisk -n 2:0:0   -t 2:bf00 -c 2:ZFS "$DISK"
+partprobe "$DISK"
+sleep 2
+
+if [[ "$DISK" == *nvme* || "$DISK" == *mmcblk* ]]; then
+    EFI="${DISK}p1"
+    ZFS="${DISK}p2"
 else
-    EFI_PART="${TARGET_DISK}1"
-    ZFS_PART="${TARGET_DISK}2"
+    EFI="${DISK}1"
+    ZFS="${DISK}2"
 fi
 
-ZFS_PART_BY_ID="/dev/disk/by-partuuid/$(blkid -s PARTUUID -o value "$ZFS_PART")"
+mkfs.vfat -F32 "$EFI"
 
-echo "[+] Formatting EFI Partition..."
-mkfs.vfat -F32 "$EFI_PART"
+ZFS_ID="/dev/disk/by-partuuid/$(blkid -s PARTUUID -o value "$ZFS")"
 
-echo "[+] Creating natively encrypted ZFS Pool 'zroot'..."
-printf '%s' "$ZFS_PASSPHRASE" | zpool create -f -o ashift=12 \
+# Encrypted ZFS pool
+printf '%s\n' "$ZFS_PASS" | zpool create -f \
+    -o ashift=12 \
     -o autotrim=on \
     -O acltype=posixacl \
     -O relatime=on \
@@ -90,18 +80,17 @@ printf '%s' "$ZFS_PASSPHRASE" | zpool create -f -o ashift=12 \
     -O keyformat=passphrase \
     -O keylocation=prompt \
     -R /mnt \
-    zroot "$ZFS_PART_BY_ID"
+    zroot "$ZFS_ID"
 
-echo "[+] Creating datasets..."
+# Datasets
 zfs create -o mountpoint=none zroot/data
 zfs create -o mountpoint=none zroot/ROOT
 zfs create -o mountpoint=/ -o canmount=noauto zroot/ROOT/default
 zfs create -o mountpoint=/home zroot/data/home
 zfs create -o mountpoint=/root zroot/data/home/root
-
 zfs create -o mountpoint=/var -o canmount=off zroot/var
 zfs create zroot/var/log
-zfs create -o mountpoint=/var/log/journal -o acltype=posixacl zroot/var/log/journal
+zfs create -o mountpoint=/var/log/journal zroot/var/log/journal
 zfs create -o mountpoint=/var/lib -o canmount=off zroot/var/lib
 zfs create zroot/var/lib/libvirt
 zfs create zroot/var/lib/docker
@@ -109,78 +98,102 @@ zfs create zroot/var/lib/docker
 zfs mount zroot/ROOT/default
 zfs mount -a
 
-mkdir -p /mnt/boot
-mount "$EFI_PART" /mnt/boot
+mkdir -p /mnt/boot /mnt/etc/zfs
+mount "$EFI" /mnt/boot
 
 zpool set bootfs=zroot/ROOT/default zroot
-mkdir -p /mnt/etc/zfs
-zpool set cachefile=/etc/zfs/zpool.cache zroot
-cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
+zpool set cachefile=/mnt/etc/zfs/zpool.cache zroot
 
-echo "[+] Bootstrapping system via pacstrap..."
-pacstrap /mnt base base-devel linux-lts linux-lts-headers dkms linux-firmware libunwind efibootmgr nano networkmanager git ansible sudo
+# Base system -- deliberately install ZFS before linux-lts
+pacstrap -K /mnt \
+    base base-devel dkms zfs-dkms zfs-utils \
+    linux-firmware libunwind efibootmgr nano \
+    networkmanager git ansible sudo
 
-genfstab -U -p /mnt >> /mnt/etc/fstab
+genfstab -U /mnt >> /mnt/etc/fstab
 
-echo "[+] Configuring system inside chroot..."
-HOSTID_VAL=$(hostid)
+# Basic system configuration
+arch-chroot /mnt systemd-firstboot \
+    --hostname="$HOST" \
+    --locale=en_US.UTF-8 \
+    --timezone=UTC
 
-# System Firstboot Configuration
-arch-chroot /mnt systemd-firstboot --hostname="${HOST_NAME}" --locale="en_US.UTF-8" --timezone="UTC"
-echo "en_US.UTF-8 UTF-8" > /mnt/etc/locale.gen && arch-chroot /mnt locale-gen
+echo "en_US.UTF-8 UTF-8" > /mnt/etc/locale.gen
+arch-chroot /mnt locale-gen
+
 echo "KEYMAP=us" > /mnt/etc/vconsole.conf
-echo "root:${ROOT_PASS}" | arch-chroot /mnt chpasswd
-arch-chroot /mnt useradd -m -G wheel -s /bin/bash "${NEW_USER}"
-echo "${NEW_USER}:${USER_PASS}" | arch-chroot /mnt chpasswd
-echo "%wheel ALL=(ALL:ALL) ALL" > /mnt/etc/sudoers.d/wheel
 
-# ArchZFS Repository Setup
-cat << 'EOF' >> /mnt/etc/pacman.conf
+echo "root:$ROOT_PASS" | arch-chroot /mnt chpasswd
+
+arch-chroot /mnt useradd -m -G wheel -s /bin/bash "$USER"
+echo "$USER:$USER_PASS" | arch-chroot /mnt chpasswd
+
+mkdir -p /mnt/etc/sudoers.d
+echo "%wheel ALL=(ALL:ALL) ALL" > /mnt/etc/sudoers.d/wheel
+chmod 440 /mnt/etc/sudoers.d/wheel
+
+# ZFS repository
+cat >> /mnt/etc/pacman.conf <<'EOF'
 
 [archzfs]
 SigLevel = TrustAll Optional
 Server = https://github.com/archzfs/archzfs/releases/download/experimental
 EOF
 
-# Install ZFS & Force DKMS Build
-arch-chroot /mnt pacman -Sy --noconfirm zfs-dkms zfs-utils
-arch-chroot /mnt zgenhostid "${HOSTID_VAL}"
+# ZFS host ID
+HOSTID=$(hostid)
+arch-chroot /mnt zgenhostid "$HOSTID"
 
-echo "[+] Compiling ZFS DKMS modules for linux-lts..."
-LTS_VER=$(arch-chroot /mnt pacman -Q linux-lts | awk '{print $2}')
-arch-chroot /mnt dkms install -m zfs -v "$(arch-chroot /mnt pacman -Q zfs-dkms | awk '{print $2}' | cut -d'-' -f1)" -k "${LTS_VER}-lts" || arch-chroot /mnt dkms autoinstall
-
-# Enable services using --root from outside chroot to prevent D-Bus warnings
-systemctl --root=/mnt enable NetworkManager zfs.target zfs-import-cache zfs-mount zfs-import.target
-
-# Mkinitcpio Setup (Correct Hook sequence and empty MODULES array)
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf block zfs filesystems keyboard)/' /mnt/etc/mkinitcpio.conf
-sed -i 's/^MODULES=.*/MODULES=()/' /mnt/etc/mkinitcpio.conf
-
-# Rebuild initramfs directly to ensure non-zero exits don't crash set -e silently
-arch-chroot /mnt mkinitcpio -k "${LTS_VER}-lts" -c /etc/mkinitcpio.conf -g /boot/initramfs-linux-lts.img
-
-# Bootloader Configuration (systemd-boot)
-arch-chroot /mnt bootctl install
-echo -e "default arch-zfs.conf\ntimeout 3" > /mnt/boot/loader/loader.conf
-cat << EOF > /mnt/boot/loader/entries/arch-zfs.conf
-title   Arch Linux (ZFS Encrypted)
-linux   /vmlinuz-linux-lts
-initrd  /initramfs-linux-lts.img
-options root=ZFS=zroot/ROOT/default rw spl.spl_hostid=0x${HOSTID_VAL}
+# ZFS initramfs configuration
+cat > /mnt/etc/mkinitcpio.conf <<'EOF'
+MODULES=(zfs)
+HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block zfs filesystems)
 EOF
 
-# Clone Ansible Repository
-echo "[+] Cloning ${ANSIBLE_REPO} into /home/${NEW_USER}/ansible..."
-arch-chroot /mnt sudo -u "${NEW_USER}" git clone "${ANSIBLE_REPO}" "/home/${NEW_USER}/ansible"
+# Kernel after ZFS hook is installed/configured
+arch-chroot /mnt pacman -S --noconfirm linux-lts linux-lts-headers
 
-echo "[+] Unmounting and exporting zpools..."
+# Make sure DKMS is built
+arch-chroot /mnt dkms autoinstall
+
+# Services
+systemctl --root=/mnt enable \
+    NetworkManager \
+    zfs.target \
+    zfs-import-cache \
+    zfs-mount \
+    zfs-import.target
+
+# Initramfs
+arch-chroot /mnt mkinitcpio -P
+
+# Bootloader
+arch-chroot /mnt bootctl install
+
+cat > /mnt/boot/loader/loader.conf <<'EOF'
+default arch-zfs.conf
+timeout 3
+editor no
+EOF
+
+cat > /mnt/boot/loader/entries/arch-zfs.conf <<EOF
+title Arch Linux (ZFS Encrypted)
+linux /vmlinuz-linux-lts
+initrd /initramfs-linux-lts.img
+options root=ZFS=zroot/ROOT/default rw spl.spl_hostid=0x${HOSTID}
+EOF
+
+# Ansible
+arch-chroot /mnt sudo -u "$USER" \
+    git clone "$ANSIBLE_REPO" "/home/$USER/ansible"
+
+# Finish
 umount /mnt/boot || true
 zfs umount -a || true
 zpool export zroot
 
-echo ""
+echo
 echo "======================================================================"
-echo " INSTALLATION COMPLETE!"
-echo " Reboot, select your drive, and type your ZFS passphrase."
+echo " INSTALL COMPLETE"
+echo " Reboot and select 'Arch Linux (ZFS Encrypted)'"
 echo "======================================================================"
