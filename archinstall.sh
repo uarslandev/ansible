@@ -24,39 +24,30 @@ echo "WARNING: $DISK WILL BE COMPLETELY ERASED."
 read -rp "Type YES to continue: " OK
 [[ "$OK" == "YES" ]] || { echo "Aborted."; exit 1; }
 
-pass() {
-    local a b prompt="$1"
-
-    while :; do
-        read -rsp "$prompt: " a >&2
-        echo >&2
-
-        read -rsp "Confirm $prompt: " b >&2
-        echo >&2
-
-        if [[ -n "$a" && "$a" == "$b" ]]; then
-            printf '%s' "$a"
-            return
-        fi
-
-        echo "Passwords do not match or are empty." >&2
-        echo >&2
-    done
-}
-
-ZFS_PASS=$(pass "ZFS passphrase")
-
 echo
 read -rp "Username: " USER
-
 while [[ -z "$USER" ]]; do
     read -rp "Username: " USER
 done
 
-USER_PASS=$(pass "Password for $USER")
-ROOT_PASS=$(pass "Root password")
-
+read -rsp "Password for $USER: " USER_PASS
 echo
+read -rsp "Confirm password: " USER_PASS2
+echo
+[[ "$USER_PASS" == "$USER_PASS2" && -n "$USER_PASS" ]] || {
+    echo "Passwords do not match."
+    exit 1
+}
+
+read -rsp "Root password: " ROOT_PASS
+echo
+read -rsp "Confirm root password: " ROOT_PASS2
+echo
+[[ "$ROOT_PASS" == "$ROOT_PASS2" && -n "$ROOT_PASS" ]] || {
+    echo "Passwords do not match."
+    exit 1
+}
+
 read -rp "Hostname [arch-zfs]: " HOST
 HOST=${HOST:-arch-zfs}
 
@@ -90,12 +81,15 @@ mkfs.vfat -F32 "$EFI"
 ZFS_ID="/dev/disk/by-partuuid/$(blkid -s PARTUUID -o value "$ZFS")"
 
 # ---------------------------------------------------------------------------
-# ZFS pool
+# Encrypted ZFS pool
 # ---------------------------------------------------------------------------
 
+echo
 echo "[+] Creating encrypted ZFS pool..."
+echo "[+] ZFS will now ask for your encryption passphrase."
+echo
 
-printf '%s\n' "$ZFS_PASS" | zpool create -f \
+zpool create -f \
     -o ashift=12 \
     -o autotrim=on \
     -O acltype=posixacl \
@@ -122,14 +116,11 @@ echo "[+] Creating datasets..."
 zfs create -o mountpoint=none zroot/data
 zfs create -o mountpoint=none zroot/ROOT
 zfs create -o mountpoint=/ -o canmount=noauto zroot/ROOT/default
-
 zfs create -o mountpoint=/home zroot/data/home
 zfs create -o mountpoint=/root zroot/data/home/root
-
 zfs create -o mountpoint=/var -o canmount=off zroot/var
 zfs create zroot/var/log
 zfs create -o mountpoint=/var/log/journal zroot/var/log/journal
-
 zfs create -o mountpoint=/var/lib -o canmount=off zroot/var/lib
 zfs create zroot/var/lib/libvirt
 zfs create zroot/var/lib/docker
@@ -302,6 +293,6 @@ echo "Reboot and select:"
 echo
 echo "  Arch Linux (ZFS Encrypted)"
 echo
-echo "You will be prompted for your ZFS passphrase."
+echo "ZFS will prompt you for the encryption passphrase."
 echo
 echo "======================================================================"
