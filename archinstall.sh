@@ -1,157 +1,209 @@
 #!/usr/bin/env bash
+#
+# Automated Arch Linux + Encrypted ZFS + Ansible + User Setup
+#
+
 set -euo pipefail
 
-HOSTNAME="srv-arch-ccc"
-KEYMAP="it"
-LOCALE_GEN="it_IT.UTF-8 UTF-8"
-LOCALE_CONF="LANG=it_IT.UTF-8"
-TIMEZONE="Europe/Rome"
+# --- CHECK PRE-REQUISITES ---
+if [[ $EUID -ne 0 ]]; then
+   echo "[!] This script must be run as root." 
+   exit 1
+fi
 
-if ! command -v pacstrap &>/dev/null; then
-    echo "Error: Must be run from an Arch Linux Live ISO."
+if ! modprobe zfs &>/dev/null; then
+    echo "[!] ZFS kernel module not loaded. Make sure you are using a ZFS-enabled Arch ISO."
     exit 1
 fi
 
-# Set system clock
-timedatectl set-ntp true
+echo "=== Arch Linux + Encrypted ZFS Installer ==="
+lsblk
+echo ""
 
-echo "--> Configuring ArchZFS Repository..."
-cat <<'EOF' >> /etc/pacman.conf
+# --- USER INPUTS ---
+read -rp "Enter target disk device (e.g. /dev/nvme0n1 or /dev/sda): " TARGET_DISK
 
-[archzfs]
-Server = https://archzfs.com/$repo/$arch
-Server = https://mirror.sum7.eu/archlinux/archzfs/$repo/$arch
-EOF
-
-# Import and sign current ArchZFS Key
-pacman-key --recv-keys F75D04B31D9C38A00E982D2D50E3EE70F939810E
-pacman-key --lsign-key F75D04B31D9C38A00E982D2D50E3EE70F939810E
-pacman -Sy --noconfirm
-
-echo "=== Available Disks ==="
-lsblk -d -n -o NAME,SIZE,TYPE,MODEL | grep "disk"
-echo "---------------------------------------------------"
-
-read -rp "Enter target disk device (e.g., /dev/nvme0n1 or /dev/sda): " DISK
-
-if [[ ! -b "$DISK" ]]; then
-    echo "Error: Block device $DISK does not exist."
+if [[ ! -b "$TARGET_DISK" ]]; then
+    echo "[!] Invalid block device: $TARGET_DISK"
     exit 1
 fi
 
-echo "WARNING: All data on $DISK will be permanently erased!"
-read -rp "Type 'YES' to continue: " CONFIRM
+echo ""
+echo "[DANGER] Entire contents of $TARGET_DISK will be erased!"
+read -rp "Type 'YES' to confirm: " CONFIRM
 if [[ "$CONFIRM" != "YES" ]]; then
     echo "Aborted."
-    exit 0
+    exit 1
 fi
 
-# Detect partition naming convention
-if [[ "$DISK" =~ nvme|mmcblk ]]; then
-    PART_EFI="${DISK}p1"
-    PART_ZFS="${DISK}p2"
+# ZFS Passphrase
+read -rsp "Enter ZFS Encryption Passphrase: " ZFS_PASSPHRASE
+echo ""
+read -rsp "Confirm ZFS Encryption Passphrase: " ZFS_PASSPHRASE_CONFIRM
+echo ""
+if [[ "$ZFS_PASSPHRASE" != "$ZFS_PASSPHRASE_CONFIRM" ]]; then
+    echo "[!] Passphrases do not match."
+    exit 1
+fi
+
+# User Account Setup
+read -rp "Enter username to create: " NEW_USER
+read -rsp "Enter password for $NEW_USER: " USER_PASS
+echo ""
+read -rsp "Enter Root password: " ROOT_PASS
+echo ""
+
+# Hostname & Ansible Repo
+read -rp "Enter Hostname [arch-zfs]: " HOST_NAME
+HOST_NAME=${HOST_NAME:-arch-zfs}
+
+read -rp "Enter Ansible Git Repo URL (optional, leave blank to skip): " ANSIBLE_REPO
+
+# --- 1. PARTITIONING ---
+echo "[+] Wiping and partitioning $TARGET_DISK..."
+sgdisk --zap-all "$TARGET_DISK"
+partprobe "$TARGET_DISK"
+
+sgdisk -n 1:0:+1G -t 1:ef00 -c 1:EFI "$TARGET_DISK"
+sgdisk -n 2:0:0   -t 2:bf00 -c 2:ZFS "$TARGET_DISK"
+partprobe "$TARGET_DISK"
+
+if [[ "$TARGET_DISK" =~ "nvme" ]]; then
+    EFI_PART="${TARGET_DISK}p1"
+    ZFS_PART="${TARGET_DISK}p2"
 else
-    PART_EFI="${DISK}1"
-    PART_ZFS="${DISK}2"
+    EFI_PART="${TARGET_DISK}1"
+    ZFS_PART="${TARGET_DISK}2"
 fi
 
-echo "--> Wiping and partitioning $DISK..."
-zpool labelclear -f "$PART_ZFS" 2>/dev/null || true
-wipefs -a "$DISK"
-sgdisk --zap-all "$DISK"
+ZFS_PART_BY_ID="/dev/disk/by-partuuid/$(blkid -s PARTUUID -o value "$ZFS_PART")"
 
-# Partitioning: 1GB EFI, Rest for ZFS
-sgdisk -n 1:1M:+1G -t 1:EF00 -c 1:"EFI System Partition" "$DISK"
-sgdisk -n 2:0:0    -t 2:BF00 -c 2:"ZFS Pool" "$DISK"
-partprobe "$DISK"
-sleep 2
+echo "[+] Formatting EFI Partition..."
+mkfs.vfat -F32 "$EFI_PART"
 
-echo "--> Formatting EFI Partition..."
-mkfs.vfat -F32 -n "EFI" "$PART_EFI"
-
-echo "--> Creating Encrypted ZFS Pool (zroot)..."
-zpool create -f -o ashift=12 \
+# --- 2. CREATE ZPOOL & DATASETS ---
+echo "[+] Creating encrypted ZFS Pool 'zroot'..."
+echo "$ZFS_PASSPHRASE" | zpool create -f -o ashift=12 \
+    -o autotrim=on \
     -O acltype=posixacl \
+    -O relatime=on \
     -O xattr=sa \
     -O dnodesize=auto \
-    -O compression=lz4 \
     -O normalization=formD \
-    -O relatime=on \
-    -O canmount=off \
     -O mountpoint=none \
-    -O encryption=on \
+    -O canmount=off \
+    -O devices=off \
+    -O compression=lz4 \
+    -O encryption=aes-256-gcm \
     -O keyformat=passphrase \
     -O keylocation=prompt \
-    -R /mnt zroot "$PART_ZFS"
+    -R /mnt \
+    zroot "$ZFS_PART_BY_ID"
 
-echo "--> Creating Root and Datasets..."
+echo "[+] Creating datasets..."
+zfs create -o mountpoint=none zroot/data
 zfs create -o mountpoint=none zroot/ROOT
-zfs create -o mountpoint=/ -o canmount=noauto zroot/ROOT/arch
-zfs create -o mountpoint=/home zroot/home
+zfs create -o mountpoint=/ -o canmount=noauto zroot/ROOT/default
+zfs create -o mountpoint=/home zroot/data/home
+zfs create -o mountpoint=/root zroot/data/home/root
 
-# Configure ZFSBootMenu boot commandline
-zfs set org.zfsbootmenu:commandline="rw quiet" zroot/ROOT/arch
+zfs create -o mountpoint=/var -o canmount=off zroot/var
+zfs create zroot/var/log
+zfs create -o mountpoint=/var/log/journal -o acltype=posixacl zroot/var/log/journal
+zfs create -o mountpoint=/var/lib -o canmount=off zroot/var/lib
+zfs create zroot/var/lib/libvirt
+zfs create zroot/var/lib/docker
 
-# Export & re-import for clean layout
-zpool export zroot
-zpool import -N -R /mnt zroot
-zfs load-key zroot
-zfs mount zroot/ROOT/arch
-zfs mount zroot/home
+zfs mount zroot/ROOT/default
+zfs mount -a
 
-mkdir -p /mnt/boot/efi
-mount "$PART_EFI" /mnt/boot/efi
+mkdir -p /mnt/boot
+mount "$EFI_PART" /mnt/boot
 
-echo "--> Bootstrapping System (pacstrap)..."
-pacstrap -K /mnt base base-devel linux-lts linux-lts-headers linux-firmware \
-    zfs-linux-lts intel-ucode amd-ucode networkmanager vim git zsh openssh efibootmgr
-
-echo "--> Generating fstab..."
-genfstab -U /mnt | grep -v "zroot" > /mnt/etc/fstab
-
-# Copy ArchZFS repo config into target environment
-cp /etc/pacman.conf /mnt/etc/pacman.conf
-
-echo "--> Configuring OS inside Chroot..."
-arch-chroot /mnt /bin/bash -e <<EOF
-# Hostname & Timezone
-echo "$HOSTNAME" > /etc/hostname
-ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
-hwclock --systohc
-
-# Locales & Keymap
-echo "$LOCALE_GEN" > /etc/locale.gen
-locale-gen
-echo "$LOCALE_CONF" > /etc/locale.conf
-echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
-
-# ZFS Configuration & HostID
-zgenhostid \$(hostid)
-mkdir -p /etc/zfs
+zpool set bootfs=zroot/ROOT/default zroot
+mkdir -p /mnt/etc/zfs
 zpool set cachefile=/etc/zfs/zpool.cache zroot
+cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
 
-# Systemd ZFS Services
-systemctl enable zfs.target zfs-import-cache zfs-mount zfs-import-scan NetworkManager sshd
+# --- 3. PACSTRAP BASE SYSTEM + ANSIBLE ---
+echo "[+] Installing minimal base system, Ansible, git, and sudo..."
+pacstrap /mnt base base-devel linux-lts linux-lts-headers firmware-linux libunwind efibootmgr nano networkmanager git ansible sudo
 
-# Adjust Initramfs HOOKS for ZFS
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modprobes zfs filesystems keyboard)/' /etc/mkinitcpio.conf
-mkinitcpio -P
+genfstab -U -p /mnt >> /mnt/etc/fstab
 
-# Set Root Password
-echo "Set root password:"
-passwd
+# --- 4. CONFIGURATION IN CHROOT ---
+echo "[+] Configuring system in chroot..."
+HOSTID_VAL=$(hostid)
 
-# Install ZFSBootMenu to EFI
-mkdir -p /boot/efi/EFI/zbm
-curl -o /boot/efi/EFI/zbm/zfsbootmenu.EFI -sSL https://get.zfsbootmenu.org/efi
-efibootmgr -c -d "$DISK" -p 1 -L "ZFSBootMenu" -l '\EFI\zbm\zfsbootmenu.EFI'
+cat <<CHROOT_SCRIPT | arch-chroot /mnt /bin/bash
+set -euo pipefail
+
+# Time & Locale
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+hwclock --systohc
+echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+echo "${HOST_NAME}" > /etc/hostname
+
+# Passwords
+echo "root:${ROOT_PASS}" | chpasswd
+useradd -m -G wheel -s /bin/bash "${NEW_USER}"
+echo "${NEW_USER}:${USER_PASS}" | chpasswd
+echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
+
+# ArchZFS Repo
+cat << 'EOF' >> /etc/pacman.conf
+
+[archzfs]
+SigLevel = TrustAll Optional
+Server = https://github.com/archzfs/archzfs/releases/download/experimental
 EOF
 
-echo "--> Cleanup & Export..."
-umount /mnt/boot/efi
+pacman -Sy --noconfirm zfs-dkms zfs-utils
+
+# Set HostID & Services
+zgenhostid ${HOSTID_VAL}
+systemctl enable NetworkManager
+systemctl enable zfs.target
+systemctl enable zfs-import-cache.service
+systemctl enable zfs-mount.service
+systemctl enable zfs-import.target
+
+# mkinitcpio
+sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect modprobes block zfs filesystems)/' /etc/mkinitcpio.conf
+sed -i 's/^MODULES=.*/MODULES=(zfs)/' /etc/mkinitcpio.conf
+mkinitcpio -p linux-lts
+
+# Bootloader
+bootctl install
+
+cat << 'EOF' > /boot/loader/loader.conf
+default arch-zfs.conf
+timeout 3
+console-mode max
+EOF
+
+cat << EOF > /boot/loader/entries/arch-zfs.conf
+title   Arch Linux (ZFS Encrypted)
+linux   /vmlinuz-linux-lts
+initrd  /initramfs-linux-lts.img
+options root=ZFS=zroot/ROOT/default rw spl.spl_hostid=0x${HOSTID_VAL}
+EOF
+
+# Clone Ansible Repository
+if [[ -n "${ANSIBLE_REPO}" ]]; then
+    echo "[+] Cloning Ansible Repository into /home/${NEW_USER}/ansible..."
+    sudo -u "${NEW_USER}" git clone "${ANSIBLE_REPO}" "/home/${NEW_USER}/ansible"
+fi
+
+CHROOT_SCRIPT
+
+# --- 5. CLEANUP ---
+echo "[+] Exporting pools..."
+umount /mnt/boot || true
 zfs umount -a
+zfs umount zroot/ROOT/default
 zpool export zroot
 
-echo "======================================================================="
-echo "Installation complete! Reboot, select ZFSBootMenu, and enter passphrase."
-echo "======================================================================="
+echo "=== INSTALLATION COMPLETE ==="
