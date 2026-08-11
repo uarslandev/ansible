@@ -5,12 +5,6 @@
     state: directory
     mode: '0755'
 
-- name: Ensure Flathub repository is configured
-  community.general.flatpak_remote:
-    name: flathub
-    state: present
-    flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
-
 - name: Enable and start Podman socket for current user
   ansible.builtin.systemd_service:
     name: podman.socket

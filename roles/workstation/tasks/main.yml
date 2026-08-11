@@ -1,49 +1,60 @@
 ---
 # ==============================================================================
-# Automatic Package Pruning (Auto-uninstall when removed from dnf_packages)
+# Automatic package pruning (auto-uninstall when removed from system_packages)
 # ==============================================================================
 
-# 1. Read previously managed DNF package manifest if it exists
-- name: Check for previously managed DNF package manifest
+# 1. Read previously managed package manifest if it exists
+- name: Check for previously managed pacman package manifest
   ansible.builtin.stat:
-    path: /var/lib/ansible_managed_dnf_packages.json
-  register: dnf_manifest_stat
+    path: /var/lib/ansible_managed_pacman_packages.json
+  register: pacman_manifest_stat
 
-- name: Read previous DNF package manifest
+- name: Read previous pacman package manifest
   ansible.builtin.slurp:
-    src: /var/lib/ansible_managed_dnf_packages.json
-  register: previous_dnf_manifest_raw
-  when: dnf_manifest_stat.stat.exists
+    src: /var/lib/ansible_managed_pacman_packages.json
+  register: previous_pacman_manifest_raw
+  when: pacman_manifest_stat.stat.exists
 
-- name: Set previous DNF package list
+- name: Set previous pacman package list
   ansible.builtin.set_fact:
-    previous_dnf_packages: "{{ (previous_dnf_manifest_raw.content | b64decode | from_json) if dnf_manifest_stat.stat.exists else [] }}"
+    previous_pacman_packages: "{{ (previous_pacman_manifest_raw.content | b64decode | from_json) if pacman_manifest_stat.stat.exists else [] }}"
 
-- name: Calculate DNF packages to auto-remove
+- name: Calculate packages to auto-remove
   ansible.builtin.set_fact:
-    dnf_packages_to_remove: "{{ previous_dnf_packages | difference(dnf_packages) }}"
+    packages_to_remove: "{{ previous_pacman_packages | difference(system_packages) }}"
 
-- name: Auto-remove DNF packages no longer listed in dnf_packages
+- name: Auto-remove packages no longer listed in system_packages
   become: true
-  ansible.builtin.dnf:
-    name: "{{ dnf_packages_to_remove }}"
+  ansible.builtin.pacman:
+    name: "{{ packages_to_remove }}"
     state: absent
-    allowerasing: true
-  when: dnf_packages_to_remove | length > 0
+  when: packages_to_remove | length > 0
 
-- name: Install current DNF packages
+- name: Install current Arch packages
   become: true
-  ansible.builtin.dnf:
-    name: "{{ dnf_packages }}"
+  ansible.builtin.pacman:
+    name: "{{ system_packages }}"
     state: present
-    allowerasing: true
 
-- name: Save updated DNF package manifest
+- name: Save updated pacman package manifest
   become: true
   ansible.builtin.copy:
-    content: "{{ dnf_packages | to_nice_json }}"
-    dest: /var/lib/ansible_managed_dnf_packages.json
+    content: "{{ system_packages | to_nice_json }}"
+    dest: /var/lib/ansible_managed_pacman_packages.json
     mode: '0644'
+
+- name: Enable and start ly display manager
+  become: true
+  ansible.builtin.systemd_service:
+    name: ly.service
+    enabled: true
+    state: started
+
+- name: Ensure Flathub repository is configured
+  community.general.flatpak_remote:
+    name: flathub
+    state: present
+    flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
 
 # ==============================================================================
 # Automatic Flatpak Pruning (Auto-uninstall when removed from flatpak_apps)

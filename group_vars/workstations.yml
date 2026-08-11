@@ -1,13 +1,15 @@
 ---
-# Packages installed via DNF on Fedora Workstations
-dnf_packages:
+# Packages installed via pacman on Arch Linux workstations
+system_packages:
   - neovim
-  - gnome-shell-extension-gsconnect
-  - kde-connect
+  - ly
+  - sway
+  - i3status
+  - kdeconnect
   - nextcloud-client
   - tmux
   - zsh
-  - zsh-autosuggestions
+  - zsh-autosuggestions-git
   - zsh-syntax-highlighting
   - git
   - curl
@@ -16,44 +18,35 @@ dnf_packages:
   - btop
   - fastfetch
   - ripgrep
-  - fd-find
+  - fd
   - fzf
   - jq
   - unzip
   - tar
   - gcc
   - make
-  - python3-pip
+  - python-pip
   - nodejs
   - npm
-  - util-linux-user
+  - util-linux
   - chezmoi
   - dconf
+  - flatpak
+  - xorg-xwayland
+  - wl-clipboard
+  - swaybg
+  - swayidle
+  - swaylock
+  - waybar
+  - foot
+  - grim
+  - slurp
 
-# GNOME Management Tools
-  - gnome-tweaks                             # GNOME Tweaks customization app
-  - gnome-extensions-app                     # GNOME Extensions GUI management app
-
-# Media Codecs & Video Players (HEVC / H.265 / H.264 Support)
+# Media Codecs & Video Players
   - vlc
-  - vlc-plugins-freeworld
-  - libavcodec-freeworld
   - ffmpeg
-  - ffmpeg-libs
   - libde265
   - x265
-  - gstreamer1-plugins-bad-freeworld
-  - gstreamer1-plugins-ugly
-
-# Cool GNOME Desktop Extensions
-  - gnome-shell-extension-dash-to-dock       # Customizable macOS/Ubuntu-style dock
-  - gnome-shell-extension-appindicator       # System tray icons for Discord/Vesktop, Spotify, Obsidian
-  - gnome-shell-extension-blur-my-shell      # Modern glassmorphism blur effects
-  - gnome-shell-extension-caffeine           # Disable screen sleep with 1 click
-  - gnome-shell-extension-just-perfection    # UI customization & animation speed control
-  - gnome-shell-extension-freon             # System hardware temps, fans, & CPU stats in top bar
-  - gnome-shell-extension-gsconnect         # Phone integration (notifications, SMS, battery)
-  - gnome-shell-extension-pop-shell         # Automatic tiling window manager
 
 # Desktop GUI Applications installed via Flatpak
 flatpak_apps:

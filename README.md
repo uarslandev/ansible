@@ -1,6 +1,6 @@
 # Infrastructure & Workstation Automation (Ansible Monorepo)
 
-A production-grade Ansible monorepo designed to provision and maintain **Fedora Workstation**, laptops, and future servers with full reproducibility, following modern **DevOps paradigms**.
+A production-grade Ansible monorepo designed to provision and maintain **Arch Linux workstations**, laptops, and future servers with full reproducibility, following modern **DevOps paradigms**.
 
 ---
 
@@ -13,11 +13,11 @@ A production-grade Ansible monorepo designed to provision and maintain **Fedora 
 ├── site.yml                 # Master playbook orchestrating all roles
 ├── group_vars/              # Variables scoped by host groups
 │   ├── all.yml              # Global settings (user home, dotfiles repo, bin path)
-│   ├── workstations.yml     # Fedora Workstation packages, Flatpaks, tool versions
+│   ├── workstations.yml     # Arch Linux packages, Flatpaks, tool versions
 │   └── servers.yml          # Server node variables
 └── roles/                   # Modular automation roles
     ├── common/              # Base setup (Flathub, Podman socket, ~/.local/bin)
-    ├── workstation/         # Fedora DNF CLI tools & Flatpak GUI apps
+    ├── workstation/         # Arch pacman CLI tools & Flatpak GUI apps
     ├── devops_tools/        # Kubernetes (kubectl, helm, k9s, kind) & Terraform
     └── dotfiles/            # Chezmoi dotfiles initialization & directory scaffolding
 ```
@@ -27,6 +27,7 @@ A production-grade Ansible monorepo designed to provision and maintain **Fedora 
 ## 🛠️ Included DevOps Stack
 
 - **Containerization**: Podman (User-space socket enabled by default)
+- **Desktop Session**: `ly` display manager + `sway` Wayland compositor + `i3status`
 - **Kubernetes Ecosystem**: `kubectl`, `helm`, `k9s`, `kind` (Kubernetes in Podman/Docker)
 - **Infrastructure as Code**: `terraform`
 - **CLI Development**: `neovim`, `tmux`, `zsh`, `git`, `ripgrep`, `fzf`, `btop`, `fastfetch`
@@ -37,7 +38,7 @@ A production-grade Ansible monorepo designed to provision and maintain **Fedora 
 
 ## 🚀 Quickstart Guide
 
-### 1. Run Local Provisioning (Fedora Workstation)
+### 1. Run Local Provisioning (Arch Linux Workstation)
 
 Execute the master playbook against `localhost`:
 
@@ -45,7 +46,7 @@ Execute the master playbook against `localhost`:
 ansible-playbook site.yml --ask-become-pass
 ```
 
-> **Note:** `--ask-become-pass` prompts for your `sudo` password to perform DNF package installations cleanly.
+> **Note:** `--ask-become-pass` prompts for your `sudo` password to perform pacman package installations cleanly.
 
 ### 2. Selective Execution (Tags / Limit)
 

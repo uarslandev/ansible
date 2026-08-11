@@ -10,7 +10,7 @@
     - role: common
       tags: [common, base]
 
-# 2. Developer Workstation Setup (Runs on Fedora Workstation & Laptops)
+# 2. Developer Workstation Setup (Runs on Arch Linux workstations & laptops)
 - name: Provision Developer Workstation Environment
   hosts: workstations
   roles:
