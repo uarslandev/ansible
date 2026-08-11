@@ -135,7 +135,7 @@ zpool set bootfs=zroot/ROOT/default zroot
 zpool set cachefile=/mnt/etc/zfs/zpool.cache zroot
 
 # ---------------------------------------------------------------------------
-# Base system (Kernel included here to avoid broken DKMS hooks later)
+# Base system (Kernel and headers included here for DKMS)
 # ---------------------------------------------------------------------------
 
 echo "[+] Installing base system..."
@@ -164,6 +164,8 @@ echo "[+] Configuring system..."
 
 HOSTID=$(hostid)
 
+echo "KEYMAP=us" > /mnt/etc/vconsole.conf
+
 arch-chroot /mnt systemd-firstboot \
     --hostname="$HOST" \
     --locale="en_US.UTF-8" \
@@ -171,8 +173,6 @@ arch-chroot /mnt systemd-firstboot \
 
 echo "en_US.UTF-8 UTF-8" > /mnt/etc/locale.gen
 arch-chroot /mnt locale-gen
-
-echo "KEYMAP=us" > /mnt/etc/vconsole.conf
 
 echo "root:$ROOT_PASS" | arch-chroot /mnt chpasswd
 
@@ -189,12 +189,14 @@ echo "%wheel ALL=(ALL:ALL) ALL" > /mnt/etc/sudoers.d/wheel
 chmod 440 /mnt/etc/sudoers.d/wheel
 
 # ---------------------------------------------------------------------------
-# ArchZFS Repo Keyring & ZFS Package Installation
+# ArchZFS Repository & Package Setup
 # ---------------------------------------------------------------------------
 
 echo "[+] Setting up ArchZFS keys and repository..."
 
-# Import and sign the ArchZFS repository key inside chroot
+# Initialize pacman keys and add ArchZFS maintainer key
+arch-chroot /mnt pacman-key --init
+arch-chroot /mnt pacman-key --populate archlinux
 arch-chroot /mnt pacman-key --recv-keys DDF7FD3B505E1FC14A4D35F6F38B5859362B6608
 arch-chroot /mnt pacman-key --lsign-key DDF7FD3B505E1FC14A4D35F6F38B5859362B6608
 
@@ -208,8 +210,8 @@ EOF
 
 arch-chroot /mnt pacman -Sy --noconfirm zfs-dkms zfs-utils
 
-# Explicitly trigger DKMS compilation before building initramfs
-echo "[+] Building ZFS kernel modules via DKMS..."
+# Force DKMS module compilation explicitly for linux-lts
+echo "[+] Compiling ZFS kernel modules via DKMS..."
 KERNEL_VER=$(arch-chroot /mnt pacman -Q linux-lts | awk '{print $2}' | cut -d'-' -f1)-lts
 arch-chroot /mnt dkms autoinstall -k "$KERNEL_VER"
 
@@ -226,8 +228,7 @@ MODULES=(zfs)
 HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block zfs filesystems)
 EOF
 
-# Copy the generated zpool.cache into target system root
-cp /mnt/etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
+cp /mnt/etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Services
