@@ -135,7 +135,7 @@ zpool set bootfs=zroot/ROOT/default zroot
 zpool set cachefile=/mnt/etc/zfs/zpool.cache zroot
 
 # ---------------------------------------------------------------------------
-# Base system
+# Base system (Kernel included here to avoid broken DKMS hooks later)
 # ---------------------------------------------------------------------------
 
 echo "[+] Installing base system..."
@@ -143,11 +143,10 @@ echo "[+] Installing base system..."
 pacstrap -K /mnt \
     base \
     base-devel \
-    dkms \
-    zfs-dkms \
-    zfs-utils \
+    linux-lts \
+    linux-lts-headers \
     linux-firmware \
-    libunwind \
+    dkms \
     efibootmgr \
     nano \
     networkmanager \
@@ -190,15 +189,29 @@ echo "%wheel ALL=(ALL:ALL) ALL" > /mnt/etc/sudoers.d/wheel
 chmod 440 /mnt/etc/sudoers.d/wheel
 
 # ---------------------------------------------------------------------------
-# ArchZFS repository
+# ArchZFS Repo Keyring & ZFS Package Installation
 # ---------------------------------------------------------------------------
+
+echo "[+] Setting up ArchZFS keys and repository..."
+
+# Import and sign the ArchZFS repository key inside chroot
+arch-chroot /mnt pacman-key --recv-keys DDF7FD3B505E1FC14A4D35F6F38B5859362B6608
+arch-chroot /mnt pacman-key --lsign-key DDF7FD3B505E1FC14A4D35F6F38B5859362B6608
 
 cat >> /mnt/etc/pacman.conf <<'EOF'
 
 [archzfs]
-SigLevel = TrustAll Optional
-Server = https://github.com/archzfs/archzfs/releases/download/experimental
+SigLevel = Required DatabaseOptional
+Server = https://archzfs.com/$repo/$arch
+Server = https://github.com/archzfs/archzfs/releases/download/$repo
 EOF
+
+arch-chroot /mnt pacman -Sy --noconfirm zfs-dkms zfs-utils
+
+# Explicitly trigger DKMS compilation before building initramfs
+echo "[+] Building ZFS kernel modules via DKMS..."
+KERNEL_VER=$(arch-chroot /mnt pacman -Q linux-lts | awk '{print $2}' | cut -d'-' -f1)-lts
+arch-chroot /mnt dkms autoinstall -k "$KERNEL_VER"
 
 # ---------------------------------------------------------------------------
 # ZFS configuration
@@ -213,17 +226,8 @@ MODULES=(zfs)
 HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block zfs filesystems)
 EOF
 
-# ---------------------------------------------------------------------------
-# Kernel
-# ---------------------------------------------------------------------------
-
-echo "[+] Installing linux-lts..."
-
-arch-chroot /mnt pacman -S --noconfirm \
-    linux-lts \
-    linux-lts-headers
-
-arch-chroot /mnt dkms autoinstall
+# Copy the generated zpool.cache into target system root
+cp /mnt/etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
 
 # ---------------------------------------------------------------------------
 # Services
