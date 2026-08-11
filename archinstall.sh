@@ -30,35 +30,36 @@ if [[ "$CONFIRM" != "YES" ]]; then
     echo "Aborted." && exit 1
 fi
 
-# Function for re-prompting passwords on mismatch & enforcing minimum length
+# Function for re-prompting passwords on mismatch
+# ALL prompt printing and line-breaks are redirected to stderr (>&2)
 get_pass() {
-    local p1 p2 prompt="$1" min_len="${2:-8}"
+    local p1 p2 prompt="$1"
     while true; do
-        read -rsp "$prompt (min $min_len chars): " p1 && echo ""
-        read -rsp "Confirm $prompt: " p2 && echo ""
-        if [[ "${#p1}" -lt "$min_len" ]]; then
-            echo "[!] Passphrase must be at least $min_len characters long. Try again." >&2
-        elif [[ "$p1" == "$p2" ]]; then
-            echo "$p1"
+        read -rsp "$prompt: " p1 >&2 && echo "" >&2
+        read -rsp "Confirm $prompt: " p2 >&2 && echo "" >&2
+        if [[ -n "$p1" && "$p1" == "$p2" ]]; then 
+            printf '%s' "$p1"
             return 0
-        else
-            echo "[!] Passwords do not match. Try again." >&2
         fi
+        echo "[!] Passwords do not match or were empty. Please try again." >&2
     done
 }
 
-# Collect Passwords & Configuration (Enforcing min 12 chars for ZFS passphrase)
-ZFS_PASSPHRASE=$(get_pass "ZFS Encryption Passphrase" 12)
-read -rp "Enter new username to create: " NEW_USER
-USER_PASS=$(get_pass "Password for $NEW_USER" 8)
-ROOT_PASS=$(get_pass "Root Password" 8)
+# Collect Passwords & Configuration
+ZFS_PASSPHRASE=$(get_pass "ZFS Encryption Passphrase")
+NEW_USER=""
+while [[ -z "$NEW_USER" ]]; do
+    read -rp "Enter new username to create: " NEW_USER
+done
+USER_PASS=$(get_pass "Password for $NEW_USER")
+ROOT_PASS=$(get_pass "Root Password")
 read -rp "Enter Hostname [arch-zfs]: " HOST_NAME
 HOST_NAME=${HOST_NAME:-arch-zfs}
 
 echo "[+] Partitioning $TARGET_DISK..."
 sgdisk --zap-all "$TARGET_DISK" && partprobe "$TARGET_DISK"
 sgdisk -n 1:0:+1G -t 1:ef00 -c 1:EFI "$TARGET_DISK"
-sgdisk -n 2:0:0   -t 2:bf00 -c 2:ZFS "$TARGET_DISK"
+sgdisk -n 2:0:0 -t 2:bf00 -c 2:ZFS "$TARGET_DISK"
 partprobe "$TARGET_DISK"
 
 if [[ "$TARGET_DISK" =~ "nvme" ]]; then
@@ -75,7 +76,7 @@ echo "[+] Formatting EFI Partition..."
 mkfs.vfat -F32 "$EFI_PART"
 
 echo "[+] Creating natively encrypted ZFS Pool 'zroot'..."
-zpool create -f -o ashift=12 \
+printf '%s' "$ZFS_PASSPHRASE" | zpool create -f -o ashift=12 \
     -o autotrim=on \
     -O acltype=posixacl \
     -O relatime=on \
@@ -90,7 +91,7 @@ zpool create -f -o ashift=12 \
     -O keyformat=passphrase \
     -O keylocation=prompt \
     -R /mnt \
-    zroot "$ZFS_PART_BY_ID" <<< "$ZFS_PASSPHRASE"
+    zroot "$ZFS_PART_BY_ID"
 
 echo "[+] Creating datasets..."
 zfs create -o mountpoint=none zroot/data
@@ -145,19 +146,14 @@ arch-chroot /mnt pacman -Sy --noconfirm zfs-dkms zfs-utils
 arch-chroot /mnt zgenhostid "${HOSTID_VAL}"
 arch-chroot /mnt systemctl enable NetworkManager zfs.target zfs-import-cache zfs-mount zfs-import.target
 
-# Mkinitcpio Setup
-sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect modprobes block zfs filesystems)/' /mnt/etc/mkinitcpio.conf
+# Mkinitcpio Setup (Fixed typo 'modprobes' -> 'modconf')
+sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect modconf block zfs filesystems)/' /mnt/etc/mkinitcpio.conf
 sed -i 's/^MODULES=.*/MODULES=(zfs)/' /mnt/etc/mkinitcpio.conf
 arch-chroot /mnt mkinitcpio -p linux-lts
 
-# Bootloader Configuration (systemd-boot with explicit HEREDOCs)
+# Bootloader Configuration (systemd-boot)
 arch-chroot /mnt bootctl install
-
-cat << 'EOF' > /mnt/boot/loader/loader.conf
-default arch-zfs.conf
-timeout 3
-EOF
-
+echo -e "default arch-zfs.conf\ntimeout 3" > /mnt/boot/loader/loader.conf
 cat << EOF > /mnt/boot/loader/entries/arch-zfs.conf
 title   Arch Linux (ZFS Encrypted)
 linux   /vmlinuz-linux-lts
@@ -177,5 +173,5 @@ zpool export zroot
 echo ""
 echo "======================================================================"
 echo " INSTALLATION COMPLETE!"
-echo " Re-enter reboot, select your drive, and type your ZFS passphrase."
+echo " Reboot, select your drive, and type your ZFS passphrase."
 echo "======================================================================"
