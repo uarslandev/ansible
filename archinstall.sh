@@ -47,7 +47,7 @@ POOL_NAME="zroot"
 
 echo ""
 echo "=================================================="
-echo "WARNING: $DISK will be completely erased!"
+echo "WARNING: ALL DATA AND PARTITIONS ON $DISK WILL BE DELETED!"
 echo "Target Pool: $POOL_NAME"
 echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED' || echo 'DISABLED')"
 echo "Username:    $USERNAME"
@@ -63,12 +63,36 @@ fi
 # --------------------------------------------------
 # 2. Disk Wipe & Partitioning
 # --------------------------------------------------
-echo "[1/7] Partitioning target disk..."
+echo "[1/7] Wiping disk metadata, partition tables, and headers..."
+
+# Unmount any active mounts or swap on the target disk
+swapoff -a || true
+for part in $(lsblk -l -n -o NAME "$DISK" | tail -n +2); do
+    umount -l "/dev/$part" 2>/dev/null || true
+done
+
+# Issue BLKDISCARD if supported (instant wipe for NVMe/SSDs)
+blkdiscard -f "$DISK" 2>/dev/null || true
+
+# Destroy ZFS labels if any prior zpool existed on the disk
+zpool labelclear -f "$DISK" 2>/dev/null || true
+
+# Zero out GPT/MBR partition tables at head and tail of drive
+dd if=/dev/zero of="$DISK" bs=1M count=100 status=none conv=fsync
+SECTORS=$(blockdev --getsz "$DISK" 2>/dev/null || echo 0)
+if [[ "$SECTORS" -gt 2048 ]]; then
+    SEEK_SECTOR=$((SECTORS - 2048))
+    dd if=/dev/zero of="$DISK" bs=512 count=2048 seek="$SEEK_SECTOR" status=none conv=fsync 2>/dev/null || true
+fi
+
+# Wipe filesystem signatures and zap GPT structures
+wipefs --all --force "$DISK"
 sgdisk --zap-all "$DISK"
 partprobe "$DISK"
 sleep 2
 
-# Create EFI Partition (512M) and ZFS Partition (Remaining)
+echo "Partitioning clean target disk..."
+# Create EFI Partition (512M) and ZFS Partition (Remaining space)
 sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI-system" "$DISK"
 sgdisk -n 2:0:0     -t 2:bf00 -c 2:"ZFS-partition" "$DISK"
 
