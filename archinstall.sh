@@ -31,7 +31,6 @@ if [[ "$CONFIRM" != "YES" ]]; then
 fi
 
 # Function for re-prompting passwords on mismatch
-# ALL prompt printing and line-breaks are redirected to stderr (>&2)
 get_pass() {
     local p1 p2 prompt="$1"
     while true; do
@@ -119,7 +118,7 @@ zpool set cachefile=/etc/zfs/zpool.cache zroot
 cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
 
 echo "[+] Bootstrapping system via pacstrap..."
-pacstrap /mnt base base-devel linux-lts linux-lts-headers linux-firmware libunwind efibootmgr nano networkmanager git ansible sudo
+pacstrap /mnt base base-devel linux-lts linux-lts-headers dkms linux-firmware libunwind efibootmgr nano networkmanager git ansible sudo
 
 genfstab -U -p /mnt >> /mnt/etc/fstab
 
@@ -129,6 +128,7 @@ HOSTID_VAL=$(hostid)
 # System Firstboot Configuration
 arch-chroot /mnt systemd-firstboot --hostname="${HOST_NAME}" --locale="en_US.UTF-8" --timezone="UTC"
 echo "en_US.UTF-8 UTF-8" > /mnt/etc/locale.gen && arch-chroot /mnt locale-gen
+echo "KEYMAP=us" > /mnt/etc/vconsole.conf
 echo "root:${ROOT_PASS}" | arch-chroot /mnt chpasswd
 arch-chroot /mnt useradd -m -G wheel -s /bin/bash "${NEW_USER}"
 echo "${NEW_USER}:${USER_PASS}" | arch-chroot /mnt chpasswd
@@ -142,16 +142,17 @@ SigLevel = TrustAll Optional
 Server = https://github.com/archzfs/archzfs/releases/download/experimental
 EOF
 
-# Install ZFS & explicitly compile DKMS modules before mkinitcpio runs
-arch-chroot /mnt pacman -Sy --noconfirm
-arch-chroot /mnt pacman -S --noconfirm zfs-dkms zfs-utils
-arch-chroot /mnt dkms autoinstall
-
+# Install ZFS & Force DKMS Build
+arch-chroot /mnt pacman -Sy --noconfirm zfs-dkms zfs-utils
 arch-chroot /mnt zgenhostid "${HOSTID_VAL}"
+
+echo "[+] Compiling ZFS DKMS modules for linux-lts..."
+LTS_VER=$(arch-chroot /mnt pacman -Q linux-lts | awk '{print $2}')
+arch-chroot /mnt dkms install -m zfs -v "$(arch-chroot /mnt pacman -Q zfs-dkms | awk '{print $2}' | cut -d'-' -f1)" -k "${LTS_VER}-lts" || arch-chroot /mnt dkms autoinstall
+
 arch-chroot /mnt systemctl enable NetworkManager zfs.target zfs-import-cache zfs-mount zfs-import.target
 
-# Mkinitcpio Setup (Created vconsole.conf to clear warnings, using modconf hook)
-echo "KEYMAP=us" > /mnt/etc/vconsole.conf
+# Mkinitcpio Setup
 sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect modconf block zfs filesystems)/' /mnt/etc/mkinitcpio.conf
 sed -i 's/^MODULES=.*/MODULES=(zfs)/' /mnt/etc/mkinitcpio.conf
 arch-chroot /mnt mkinitcpio -p linux-lts
