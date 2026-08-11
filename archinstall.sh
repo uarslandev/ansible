@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 #
-# Automated Arch Linux + Encrypted ZFS + Ansible + User Setup
+# Automated Arch Linux + Encrypted ZFS + Automated User + Ansible Repo Setup
 #
 
 set -euo pipefail
+
+# --- HARDCODED CONFIGURATION ---
+ANSIBLE_REPO="https://github.com/uarslandev/ansible.git"
 
 # --- CHECK PRE-REQUISITES ---
 if [[ $EUID -ne 0 ]]; then
@@ -16,11 +19,11 @@ if ! modprobe zfs &>/dev/null; then
     exit 1
 fi
 
-echo "=== Arch Linux + Encrypted ZFS Installer ==="
+echo "=== Arch Linux + Encrypted ZFS + Ansible Installer ==="
 lsblk
 echo ""
 
-# --- USER INPUTS ---
+# --- AUTOMATED PROMPTS ---
 read -rp "Enter target disk device (e.g. /dev/nvme0n1 or /dev/sda): " TARGET_DISK
 
 if [[ ! -b "$TARGET_DISK" ]]; then
@@ -30,7 +33,7 @@ fi
 
 echo ""
 echo "[DANGER] Entire contents of $TARGET_DISK will be erased!"
-read -rp "Type 'YES' to confirm: " CONFIRM
+read -rp "Type 'YES' to confirm disk wipe: " CONFIRM
 if [[ "$CONFIRM" != "YES" ]]; then
     echo "Aborted."
     exit 1
@@ -46,18 +49,15 @@ if [[ "$ZFS_PASSPHRASE" != "$ZFS_PASSPHRASE_CONFIRM" ]]; then
     exit 1
 fi
 
-# User Account Setup
-read -rp "Enter username to create: " NEW_USER
+# User Account Creation Setup
+read -rp "Enter new username to create: " NEW_USER
 read -rsp "Enter password for $NEW_USER: " USER_PASS
 echo ""
 read -rsp "Enter Root password: " ROOT_PASS
 echo ""
 
-# Hostname & Ansible Repo
 read -rp "Enter Hostname [arch-zfs]: " HOST_NAME
 HOST_NAME=${HOST_NAME:-arch-zfs}
-
-read -rp "Enter Ansible Git Repo URL (optional, leave blank to skip): " ANSIBLE_REPO
 
 # --- 1. PARTITIONING ---
 echo "[+] Wiping and partitioning $TARGET_DISK..."
@@ -125,7 +125,7 @@ mkdir -p /mnt/etc/zfs
 zpool set cachefile=/etc/zfs/zpool.cache zroot
 cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
 
-# --- 3. PACSTRAP BASE SYSTEM + ANSIBLE ---
+# --- 3. PACSTRAP MINIMAL SYSTEM + ANSIBLE ---
 echo "[+] Installing minimal base system, Ansible, git, and sudo..."
 pacstrap /mnt base base-devel linux-lts linux-lts-headers firmware-linux libunwind efibootmgr nano networkmanager git ansible sudo
 
@@ -146,13 +146,15 @@ locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "${HOST_NAME}" > /etc/hostname
 
-# Passwords
+# Set Root Password
 echo "root:${ROOT_PASS}" | chpasswd
+
+# Automated User Creation & Sudo Setup
 useradd -m -G wheel -s /bin/bash "${NEW_USER}"
 echo "${NEW_USER}:${USER_PASS}" | chpasswd
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
 
-# ArchZFS Repo
+# Configure ArchZFS Repo
 cat << 'EOF' >> /etc/pacman.conf
 
 [archzfs]
@@ -170,12 +172,12 @@ systemctl enable zfs-import-cache.service
 systemctl enable zfs-mount.service
 systemctl enable zfs-import.target
 
-# mkinitcpio
+# mkinitcpio Setup
 sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect modprobes block zfs filesystems)/' /etc/mkinitcpio.conf
 sed -i 's/^MODULES=.*/MODULES=(zfs)/' /etc/mkinitcpio.conf
 mkinitcpio -p linux-lts
 
-# Bootloader
+# Bootloader Setup
 bootctl install
 
 cat << 'EOF' > /boot/loader/loader.conf
@@ -191,19 +193,21 @@ initrd  /initramfs-linux-lts.img
 options root=ZFS=zroot/ROOT/default rw spl.spl_hostid=0x${HOSTID_VAL}
 EOF
 
-# Clone Ansible Repository
-if [[ -n "${ANSIBLE_REPO}" ]]; then
-    echo "[+] Cloning Ansible Repository into /home/${NEW_USER}/ansible..."
-    sudo -u "${NEW_USER}" git clone "${ANSIBLE_REPO}" "/home/${NEW_USER}/ansible"
-fi
+# Clone Ansible Repository into User's Home Directory
+echo "[+] Cloning ${ANSIBLE_REPO} into /home/${NEW_USER}/ansible..."
+sudo -u "${NEW_USER}" git clone "${ANSIBLE_REPO}" "/home/${NEW_USER}/ansible"
 
 CHROOT_SCRIPT
 
 # --- 5. CLEANUP ---
-echo "[+] Exporting pools..."
+echo "[+] Exporting zpools and unmounting..."
 umount /mnt/boot || true
 zfs umount -a
 zfs umount zroot/ROOT/default
 zpool export zroot
 
+echo ""
 echo "=== INSTALLATION COMPLETE ==="
+echo "Created user '${NEW_USER}' with full sudo access."
+echo "Ansible repository cloned to '/home/${NEW_USER}/ansible'."
+echo "You can now safely reboot!"
