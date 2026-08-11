@@ -59,7 +59,7 @@ HOST_NAME=${HOST_NAME:-arch-zfs}
 echo "[+] Partitioning $TARGET_DISK..."
 sgdisk --zap-all "$TARGET_DISK" && partprobe "$TARGET_DISK"
 sgdisk -n 1:0:+1G -t 1:ef00 -c 1:EFI "$TARGET_DISK"
-sgdisk -n 2:0:0 -t 2:bf00 -c 2:ZFS "$TARGET_DISK"
+sgdisk -n 2:0:0  -t 2:bf00 -c 2:ZFS "$TARGET_DISK"
 partprobe "$TARGET_DISK"
 
 if [[ "$TARGET_DISK" =~ "nvme" ]]; then
@@ -142,11 +142,16 @@ SigLevel = TrustAll Optional
 Server = https://github.com/archzfs/archzfs/releases/download/experimental
 EOF
 
-arch-chroot /mnt pacman -Sy --noconfirm zfs-dkms zfs-utils
+# Install ZFS & explicitly compile DKMS modules before mkinitcpio runs
+arch-chroot /mnt pacman -Sy --noconfirm
+arch-chroot /mnt pacman -S --noconfirm zfs-dkms zfs-utils
+arch-chroot /mnt dkms autoinstall
+
 arch-chroot /mnt zgenhostid "${HOSTID_VAL}"
 arch-chroot /mnt systemctl enable NetworkManager zfs.target zfs-import-cache zfs-mount zfs-import.target
 
-# Mkinitcpio Setup (Fixed typo 'modprobes' -> 'modconf')
+# Mkinitcpio Setup (Created vconsole.conf to clear warnings, using modconf hook)
+echo "KEYMAP=us" > /mnt/etc/vconsole.conf
 sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect modconf block zfs filesystems)/' /mnt/etc/mkinitcpio.conf
 sed -i 's/^MODULES=.*/MODULES=(zfs)/' /mnt/etc/mkinitcpio.conf
 arch-chroot /mnt mkinitcpio -p linux-lts
