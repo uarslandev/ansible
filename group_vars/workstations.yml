@@ -5,8 +5,15 @@ system_packages:
   - ly
   - sway
   - i3status
-  - kdeconnect
-  - nextcloud-client
+  - swaybg
+  - swayidle
+  - swaylock
+  - waybar
+  - foot
+  - grim
+  - slurp
+  - xorg-xwayland
+  - wl-clipboard
   - tmux
   - zsh
   - zsh-autosuggestions-git
@@ -30,30 +37,6 @@ system_packages:
   - npm
   - util-linux
   - chezmoi
-  - dconf
-  - flatpak
-  - xorg-xwayland
-  - wl-clipboard
-  - swaybg
-  - swayidle
-  - swaylock
-  - waybar
-  - foot
-  - grim
-  - slurp
-
-# Media Codecs & Video Players
-  - vlc
-  - ffmpeg
-  - libde265
-  - x265
-
-# Desktop GUI Applications installed via Flatpak
-flatpak_apps:
-  - dev.vencord.Vesktop
-  - com.google.Chrome
-  - com.spotify.Client
-  - md.obsidian.Obsidian
 
 # Versions for standalone DevOps tools
 devops_tool_versions:

@@ -1,6 +1,6 @@
 # Infrastructure & Workstation Automation (Ansible Monorepo)
 
-A production-grade Ansible monorepo designed to provision and maintain **Arch Linux workstations**, laptops, and future servers with full reproducibility, following modern **DevOps paradigms**.
+A production-grade Ansible monorepo designed to provision and maintain **minimal Arch Linux and WSL developer environments** with full reproducibility, following modern **DevOps paradigms**.
 
 ---
 
@@ -13,11 +13,11 @@ A production-grade Ansible monorepo designed to provision and maintain **Arch Li
 ├── site.yml                 # Master playbook orchestrating all roles
 ├── group_vars/              # Variables scoped by host groups
 │   ├── all.yml              # Global settings (user home, dotfiles repo, bin path)
-│   ├── workstations.yml     # Arch Linux packages, Flatpaks, tool versions
+│   ├── workstations.yml     # Minimal Arch package set and tool versions
 │   └── servers.yml          # Server node variables
 └── roles/                   # Modular automation roles
-    ├── common/              # Base setup (Flathub, Podman socket, ~/.local/bin)
-    ├── workstation/         # Arch pacman CLI tools & Flatpak GUI apps
+    ├── common/              # Base setup (~/.local/bin)
+    ├── workstation/         # Arch pacman CLI tools, sway/ly desktop, and paru bootstrap
     ├── devops_tools/        # Kubernetes (kubectl, helm, k9s, kind) & Terraform
     └── dotfiles/            # Chezmoi dotfiles initialization & directory scaffolding
 ```
@@ -26,19 +26,18 @@ A production-grade Ansible monorepo designed to provision and maintain **Arch Li
 
 ## 🛠️ Included DevOps Stack
 
-- **Containerization**: Podman (User-space socket enabled by default)
 - **Desktop Session**: `ly` display manager + `sway` Wayland compositor + `i3status`
-- **Kubernetes Ecosystem**: `kubectl`, `helm`, `k9s`, `kind` (Kubernetes in Podman/Docker)
+- **Kubernetes Ecosystem**: `kubectl`, `helm`, `k9s`, `kind`
 - **Infrastructure as Code**: `terraform`
 - **CLI Development**: `neovim`, `tmux`, `zsh`, `git`, `ripgrep`, `fzf`, `btop`, `fastfetch`
 - **Dotfiles Engine**: `chezmoi`
-- **Flatpak Apps**: Vesktop, Spotify, Obsidian
+- **AUR Helper**: `paru`
 
 ---
 
 ## 🚀 Quickstart Guide
 
-### 1. Run Local Provisioning (Arch Linux Workstation)
+### 1. Run Local Provisioning (Arch Linux / WSL)
 
 Execute the master playbook against `localhost`:
 

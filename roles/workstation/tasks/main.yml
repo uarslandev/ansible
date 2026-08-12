@@ -63,53 +63,6 @@
     enabled: true
     state: started
 
-- name: Ensure Flathub repository is configured
-  community.general.flatpak_remote:
-    name: flathub
-    state: present
-    flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
-
-# ==============================================================================
-# Automatic Flatpak Pruning (Auto-uninstall when removed from flatpak_apps)
-# ==============================================================================
-
-- name: Check for previously managed Flatpak manifest
-  ansible.builtin.stat:
-    path: "{{ user_home }}/.local/share/ansible_managed_flatpaks.json"
-  register: flatpak_manifest_stat
-
-- name: Read previous Flatpak manifest
-  ansible.builtin.slurp:
-    src: "{{ user_home }}/.local/share/ansible_managed_flatpaks.json"
-  register: previous_flatpak_manifest_raw
-  when: flatpak_manifest_stat.stat.exists
-
-- name: Set previous Flatpak list
-  ansible.builtin.set_fact:
-    previous_flatpak_apps: "{{ (previous_flatpak_manifest_raw.content | b64decode | from_json) if flatpak_manifest_stat.stat.exists else [] }}"
-
-- name: Calculate Flatpaks to auto-remove
-  ansible.builtin.set_fact:
-    flatpaks_to_remove: "{{ previous_flatpak_apps | difference(flatpak_apps) }}"
-
-- name: Auto-remove Flatpak applications no longer listed in flatpak_apps
-  community.general.flatpak:
-    name: "{{ flatpaks_to_remove }}"
-    state: absent
-  when: flatpaks_to_remove | length > 0
-
-- name: Install Desktop Applications via Flatpak
-  community.general.flatpak:
-    name: "{{ flatpak_apps }}"
-    state: present
-    remote: flathub
-
-- name: Save updated Flatpak manifest
-  ansible.builtin.copy:
-    content: "{{ flatpak_apps | to_nice_json }}"
-    dest: "{{ user_home }}/.local/share/ansible_managed_flatpaks.json"
-    mode: '0644'
-
 # ==============================================================================
 # Oh-My-Zsh & Powerlevel10k Automation
 # ==============================================================================
@@ -127,19 +80,3 @@
     dest: "{{ user_home }}/.oh-my-zsh/custom/themes/powerlevel10k"
     depth: 1
     update: false
-
-# ==============================================================================
-# Restore GNOME Settings (Theme, Keybindings, Dock, Touchpad)
-# ==============================================================================
-
-- name: Check if GNOME dconf settings dump exists
-  ansible.builtin.stat:
-    path: "{{ user_home }}/.config/dconf/settings.dconf"
-  register: dconf_dump_stat
-
-- name: Restore GNOME settings via dconf
-  ansible.builtin.shell:
-    cmd: "dconf load / < {{ user_home }}/.config/dconf/settings.dconf"
-  when: dconf_dump_stat.stat.exists
-  failed_when: false
-  changed_when: false
