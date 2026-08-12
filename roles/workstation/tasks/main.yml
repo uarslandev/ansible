@@ -72,15 +72,15 @@
     - aur_packages | default([]) | length > 0
     - paru_binary_stat.stat.exists
 
-- name: Check if ly systemd unit file exists
+- name: Check if ly templated systemd unit file exists
   ansible.builtin.stat:
-    path: /usr/lib/systemd/system/ly.service
+    path: /usr/lib/systemd/system/ly@.service
   register: ly_service_unit
 
-- name: Enable and start ly display manager
+- name: Enable and start ly on tty1
   become: true
   ansible.builtin.systemd_service:
-    name: ly.service
+    name: ly@tty1.service
     enabled: true
     state: started
   when:

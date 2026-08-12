@@ -9,11 +9,16 @@ system_packages:
   - swayidle
   - swaylock
   - waybar
+  - wofi
   - foot
+  - thunar
   - grim
   - slurp
   - xorg-xwayland
+  - xdg-desktop-portal
+  - xdg-desktop-portal-wlr
   - wl-clipboard
+  - torbrowser-launcher
   - tmux
   - zsh
   - git
