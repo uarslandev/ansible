@@ -251,8 +251,14 @@ elif [[ "$FS_CHOICE" == "3" ]]; then
     mount -o compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
 fi
 
-mkdir -p /mnt/boot
-mount "$EFI_PART" /mnt/boot
+# For ZFSBootMenu, mount EFI to /efi so /boot stays inside ZFS root
+EFI_MOUNT_POINT="/boot"
+if [[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]]; then
+    EFI_MOUNT_POINT="/efi"
+fi
+
+mkdir -p "/mnt$EFI_MOUNT_POINT"
+mount "$EFI_PART" "/mnt$EFI_MOUNT_POINT"
 
 # --------------------------------------------------
 # 4. Pacstrap Base System
@@ -374,16 +380,15 @@ WINENTRY
 
 else
     echo "Configuring ZFSBootMenu..."
-    mkdir -p /boot/EFI/zfsbootmenu /boot/EFI/BOOT
+    mkdir -p /efi/EFI/zfsbootmenu /efi/EFI/BOOT
 
     # Direct fetch of the compiled release EFI executable from zbm-dev
     echo "Downloading ZFSBootMenu EFI stub..."
-    curl -fsSL -L -o /boot/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi" || \
-    curl -fsSL -L -o /boot/EFI/zfsbootmenu/zfsbootmenu.efi "https://github.com/zbm-dev/zfsbootmenu/releases/latest/download/zfsbootmenu-release-x86_64-v2.3.0.EFI"
+    curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi" || \
+    curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "https://github.com/zbm-dev/zfsbootmenu/releases/latest/download/zfsbootmenu-release-x86_64-v2.3.0.EFI"
 
-    if [[ -s /boot/EFI/zfsbootmenu/zfsbootmenu.efi ]]; then
-        # Copy to UEFI default fallback location
-        cp /boot/EFI/zfsbootmenu/zfsbootmenu.efi /boot/EFI/BOOT/BOOTX64.EFI
+    if [[ -s /efi/EFI/zfsbootmenu/zfsbootmenu.efi ]]; then
+        cp /efi/EFI/zfsbootmenu/zfsbootmenu.efi /efi/EFI/BOOT/BOOTX64.EFI
         efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
     else
         echo "Error: Failed to fetch ZFSBootMenu EFI binary."
@@ -428,7 +433,7 @@ fi
 # 7. Clean Up & Unmount
 # --------------------------------------------------
 echo "[7/7] Unmounting partitions..."
-umount /mnt/boot
+umount "/mnt$EFI_MOUNT_POINT"
 if [[ "$FS_CHOICE" == "1" ]]; then
     zfs unmount -a
     zpool export "$POOL_NAME"
