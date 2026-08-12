@@ -1,50 +1,54 @@
 ---
 # Packages installed via pacman on Arch Linux workstations
 system_packages:
-  - neovim
-  - ly
-  - sway
+  - btop
+  - chezmoi
+  - curl
+  - fastfetch
+  - fd
+  - foot
+  - fzf
+  - gcc
+  - git
+  - grim
+  - htop
   - i3status
+  - jq
+  - ly
+  - make
+  - neovim
+  - nodejs
+  - npm
+  - python-pip
+  - ripgrep
+  - slurp
+  - sway
   - swaybg
   - swayidle
   - swaylock
-  - waybar
-  - wofi
-  - foot
+  - tar
   - thunar
-  - grim
-  - slurp
-  - xorg-xwayland
+  - tmux
+  - torbrowser-launcher
+  - unzip
+  - util-linux
+  - waybar
+  - wget
+  - wl-clipboard
+  - wofi
   - xdg-desktop-portal
   - xdg-desktop-portal-wlr
-  - wl-clipboard
-  - torbrowser-launcher
-  - tmux
+  - xorg-xwayland
   - zsh
-  - git
-  - curl
-  - wget
-  - htop
-  - btop
-  - fastfetch
-  - ripgrep
-  - fd
-  - fzf
-  - jq
-  - unzip
-  - tar
-  - gcc
-  - make
-  - python-pip
-  - nodejs
-  - npm
-  - util-linux
-  - chezmoi
 
 # AUR packages installed via paru (when available)
 aur_packages:
+  - antigravity-cli
+  - paru
+  - paru-debug
+  - zfs-linux
+  - zfs-utils
   - zsh-autosuggestions-git
-  - zsh-syntax-highlighting
 
 # Versions for standalone DevOps tools
 devops_tool_versions:

@@ -63,6 +63,15 @@
     path: /usr/bin/paru
   register: paru_binary_stat
 
+- name: Ensure target user has passwordless sudo for pacman (required for paru)
+  become: true
+  ansible.builtin.copy:
+    content: "{{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
+    dest: /etc/sudoers.d/99-ansible-aur-pacman
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
+
 - name: Check for previously managed AUR package manifest
   ansible.builtin.stat:
     path: /var/lib/ansible_managed_aur_packages.json
@@ -109,6 +118,13 @@
     dest: /var/lib/ansible_managed_aur_packages.json
     mode: '0644'
   when: paru_binary_stat.stat.exists
+
+- name: Deploy pkg-sync utility script
+  ansible.builtin.copy:
+    src: pkg-sync
+    dest: "{{ user_bin }}/pkg-sync"
+    mode: '0755'
+
 
 - name: Check if ly templated systemd unit file exists
   ansible.builtin.stat:

@@ -1,0 +1,17 @@
+---
+# ==============================================================================
+# Package Drift & Synchronization Playbook
+# ==============================================================================
+- name: Synchronize Installed Arch Linux Packages with Ansible Config
+  hosts: workstations
+  gather_facts: true
+  tasks:
+    - name: Audit package drift between system and group_vars/workstations.yml
+      ansible.builtin.command:
+        cmd: "{{ user_bin }}/pkg-sync {{ '--apply' if (apply | default(false) | bool) else '' }}"
+      register: pkg_sync_out
+      changed_when: "'Successfully updated' in pkg_sync_out.stdout"
+
+    - name: Display package audit & sync results
+      ansible.builtin.debug:
+        msg: "{{ pkg_sync_out.stdout_lines }}"

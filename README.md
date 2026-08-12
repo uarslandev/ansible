@@ -84,6 +84,40 @@ ansible-playbook -i inventory.ini site.yml --limit workstations --ask-become-pas
 
 ---
 
+## 📦 Package Management & Synchronization (`pkg-sync`)
+
+This setup features two-way package synchronization between Arch Linux and Ansible:
+
+1. **Ansible -> System (Playbook Execution)**:
+   - Running `ansible-playbook site.yml` installs all packages in `group_vars/workstations.yml`.
+   - Any package removed from `system_packages` or `aur_packages` is automatically uninstalled from Arch Linux.
+   - `paru` is automatically bootstrapped if not present on the system.
+
+2. **System -> Ansible (`pkg-sync` CLI Tool)**:
+   - When you install packages manually using `paru -S <pkg>` or remove packages via `paru -R <pkg>`, use `pkg-sync` to keep `group_vars/workstations.yml` updated.
+
+   ```bash
+   # Check package drift between system and workstations.yml
+   pkg-sync
+
+   # Automatically update workstations.yml to match your installed packages
+   pkg-sync --apply
+
+   # Interactively review and update package lists
+   pkg-sync --interactive
+
+   # Explicitly add or remove a package (auto-detects pacman vs AUR)
+   pkg-sync --add spotify
+   pkg-sync --remove foot
+   ```
+
+3. **Playbook Package Audit**:
+   ```bash
+   ansible-playbook sync.yml
+   ```
+
+---
+
 ## 🖥️ Expanding to Home Server / Remote Nodes
 
 To manage remote Linux servers or laptops:
@@ -97,3 +131,4 @@ To manage remote Linux servers or laptops:
    ```bash
    ansible-playbook site.yml --limit servers
    ```
+
