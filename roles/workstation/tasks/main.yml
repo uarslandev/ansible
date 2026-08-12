@@ -53,8 +53,29 @@
   become: true
   ansible.builtin.command:
     cmd: /tmp/install_paru.sh
+  register: paru_install_result
   args:
     creates: /usr/bin/paru
+  failed_when: paru_install_result.rc != 0 and "target not found" not in (paru_install_result.stderr | lower)
+
+- name: Check whether paru binary is installed
+  ansible.builtin.stat:
+    path: /usr/bin/paru
+  register: paru_binary_stat
+
+- name: Install AUR packages with paru when available
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: "paru -S --noconfirm --needed {{ aur_packages | join(' ') }}"
+  when:
+    - aur_packages | default([]) | length > 0
+    - paru_binary_stat.stat.exists
+
+- name: Check if ly systemd unit file exists
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system/ly.service
+  register: ly_service_unit
 
 - name: Enable and start ly display manager
   become: true
@@ -62,6 +83,9 @@
     name: ly.service
     enabled: true
     state: started
+  when:
+    - ansible_service_mgr == "systemd"
+    - ly_service_unit.stat.exists
 
 # ==============================================================================
 # Oh-My-Zsh & Powerlevel10k Automation
