@@ -152,8 +152,25 @@ zfs mount "$POOL_NAME/home"
 mkdir -p /mnt/boot/efi
 mount "$EFI_PART" /mnt/boot/efi
 
-# 4. Pacstrap Base System
-echo -e "${YELLOW}[4/6] Installing Base Packages (pacstrap)...${NC}"
+# 4. Configure ArchZFS Repository & Pacstrap Base System
+echo -e "${YELLOW}[4/6] Setting up ArchZFS Repo & Installing Base Packages...${NC}"
+
+# Receive ArchZFS Key and sign it for current session
+pacman-key --recv-keys DDF7FD3B505E1FC124A4470F324686482D7804F2 --keyserver hkph://keyserver.ubuntu.com || true
+pacman-key --lsign-key DDF7FD3B505E1FC124A4470F324686482D7804F2 || true
+
+# Add archzfs repository with standard mirror URL if not already added
+if ! grep -q "\[archzfs\]" /etc/pacman.conf; then
+    cat <<EOF >> /etc/pacman.conf
+
+[archzfs]
+Server = https://archzfs.com/\$repo/\$arch
+EOF
+fi
+
+pacman -Sy --noconfirm
+
+# Run pacstrap
 pacstrap /mnt base base-devel "$KERNEL_PKG" "$KERNEL_PKG-headers" "$ZFS_PKG" \
     firmware-linux git neovim sudo networkmanager efibootmgr curl gptfdisk
 
@@ -191,6 +208,18 @@ useradd -m -G wheel -s /bin/bash "$USERNAME"
 echo "$USERNAME:$USER_PASS" | chpasswd
 echo "root:$USER_PASS" | chpasswd
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
+
+# Enable ArchZFS inside target system
+pacman-key --recv-keys DDF7FD3B505E1FC124A4470F324686482D7804F2 --keyserver hkph://keyserver.ubuntu.com || true
+pacman-key --lsign-key DDF7FD3B505E1FC124A4470F324686482D7804F2 || true
+
+if ! grep -q "\[archzfs\]" /etc/pacman.conf; then
+    cat <<EOF >> /etc/pacman.conf
+
+[archzfs]
+Server = https://archzfs.com/\$repo/\$arch
+EOF
+fi
 
 # Enable Services
 systemctl enable NetworkManager
