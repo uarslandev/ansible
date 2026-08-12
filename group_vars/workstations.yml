@@ -16,8 +16,6 @@ system_packages:
   - wl-clipboard
   - tmux
   - zsh
-  - zsh-autosuggestions-git
-  - zsh-syntax-highlighting
   - git
   - curl
   - wget
@@ -37,6 +35,11 @@ system_packages:
   - npm
   - util-linux
   - chezmoi
+
+# AUR packages installed via paru (when available)
+aur_packages:
+  - zsh-autosuggestions-git
+  - zsh-syntax-highlighting
 
 # Versions for standalone DevOps tools
 devops_tool_versions:
