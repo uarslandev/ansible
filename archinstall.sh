@@ -103,6 +103,16 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     fi
 fi
 
+# Ansible Run Preference
+echo ""
+read -rp "Do you want to run Ansible to set up the machine right after installation? (y/N): " RUN_ANSIBLE
+RUN_ANSIBLE=$(echo "$RUN_ANSIBLE" | tr '[:upper:]' '[:lower:]')
+
+CUSTOM_PLAYBOOK=""
+if [[ "$RUN_ANSIBLE" == "y" || "$RUN_ANSIBLE" == "yes" ]]; then
+    read -rp "Enter playbook filename if not default (leave empty for auto-detect local.yml/site.yml/main.yml): " CUSTOM_PLAYBOOK
+fi
+
 POOL_NAME="zroot"
 
 # Kernel command line parameters
@@ -118,6 +128,7 @@ echo "Username:    $USERNAME"
 echo "Timezone:    $TIMEZONE"
 echo "Bootloader:  $([[ "$BOOTLOADER_CHOICE" == "2" ]] && echo 'GRUB' || ([[ "$BOOTLOADER_CHOICE" == "3" ]] && echo 'systemd-boot' || echo 'ZFSBootMenu'))"
 echo "Dual-Boot:   $([[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo 'YES (Windows)' || echo 'NO')"
+echo "Run Ansible: $([[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]] && echo 'YES' || echo 'NO')"
 echo "Git Repo:    https://github.com/uarslandev/ansible.git"
 echo "=================================================="
 read -rp "Are you sure you want to proceed? (type 'YES'): " CONFIRM
@@ -247,7 +258,7 @@ mount "$EFI_PART" /mnt/boot
 # 4. Pacstrap Base System
 # --------------------------------------------------
 echo "[4/7] Installing base system and packages..."
-PACMAN_PKGS=(base linux linux-firmware sudo nano networkmanager efibootmgr git ansible)
+PACMAN_PKGS=(base linux linux-firmware sudo nano networkmanager efibootmgr git ansible curl)
 
 if [[ "$FS_CHOICE" == "1" ]]; then
     PACMAN_PKGS+=(zfs-linux)
@@ -326,7 +337,7 @@ fi
 # --------------------------------------------------
 if [[ "$BOOTLOADER_CHOICE" == "2" ]]; then
     echo "Configuring GRUB Bootloader..."
-    grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+    grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --removable
     
     if [[ "$FS_CHOICE" == "1" ]]; then
         sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw"/' /etc/default/grub
@@ -364,20 +375,27 @@ WINENTRY
 else
     # Default ZFSBootMenu Setup
     echo "Configuring ZFSBootMenu..."
-    mkdir -p /boot/EFI/zfsbootmenu
-    curl -sL "https://get.zfsbootmenu.org/latest.tar.gz" | tar -xz -C /tmp
+    mkdir -p /boot/EFI/zfsbootmenu /boot/EFI/BOOT
+    
+    curl -fsL "https://get.zfsbootmenu.org/latest.tar.gz" | tar -xz -C /tmp
     EFISTUB=\$(find /tmp -name "zfsbootmenu-*.EFI" | head -n 1)
 
     if [[ -f "\$EFISTUB" ]]; then
         cp "\$EFISTUB" /boot/EFI/zfsbootmenu/zfsbootmenu.efi
-        efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose
+        # Copy to default UEFI fallback location so motherboards always boot it
+        cp "\$EFISTUB" /boot/EFI/BOOT/BOOTX64.EFI
+        
+        efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
+    else
+        echo "Error: Failed to fetch ZFSBootMenu EFI stub."
+        exit 1
     fi
 fi
 
 CHROOT_SCRIPT
 
 # --------------------------------------------------
-# 6. Set Bootloader Pool Properties (ZFS Only)
+# 6. Set Bootloader Pool Properties (ZFS Only) & Run Ansible
 # --------------------------------------------------
 if [[ "$FS_CHOICE" == "1" ]]; then
     echo "[6/7] Setting pool boot properties..."
@@ -386,26 +404,25 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
 fi
 
-read -rp "Do you want to run Ansible to set up the machine now? (y/N): " RUN_ANSIBLE
-RUN_ANSIBLE=$(echo "$RUN_ANSIBLE" | tr '[:upper:]' '[:lower:]')
-
 if [[ "$RUN_ANSIBLE" == "y" || "$RUN_ANSIBLE" == "yes" ]]; then
     echo "Running Ansible playbook inside chroot..."
-    arch-chroot /mnt /bin/bash -c "
-        cd /home/$USERNAME/ansible
-        if [[ -f local.yml ]]; then
-            su - $USERNAME -c 'cd ~/ansible && ansible-playbook local.yml --connection=local'
-        elif [[ -f site.yml ]]; then
-            su - $USERNAME -c 'cd ~/ansible && ansible-playbook site.yml --connection=local'
-        elif [[ -f main.yml ]]; then
-            su - $USERNAME -c 'cd ~/ansible && ansible-playbook main.yml --connection=local'
-        else
-            echo 'Running interactive playbook selection:'
-            ls -la /home/$USERNAME/ansible
-            read -rp 'Enter playbook filename to run (e.g., playbook.yml): ' PB_NAME
-            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PB_NAME --connection=local\"
-        fi
-    "
+    
+    if [[ -n "$CUSTOM_PLAYBOOK" ]]; then
+        arch-chroot /mnt /bin/bash -c "su - $USERNAME -c 'cd ~/ansible && ansible-playbook $CUSTOM_PLAYBOOK --connection=local'"
+    else
+        arch-chroot /mnt /bin/bash -c "
+            cd /home/$USERNAME/ansible
+            if [[ -f local.yml ]]; then
+                su - $USERNAME -c 'cd ~/ansible && ansible-playbook local.yml --connection=local'
+            elif [[ -f site.yml ]]; then
+                su - $USERNAME -c 'cd ~/ansible && ansible-playbook site.yml --connection=local'
+            elif [[ -f main.yml ]]; then
+                su - $USERNAME -c 'cd ~/ansible && ansible-playbook main.yml --connection=local'
+            else
+                echo 'No default playbook (local.yml, site.yml, main.yml) found. Skipping Ansible execution.'
+            fi
+        "
+    fi
 fi
 
 # --------------------------------------------------
