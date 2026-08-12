@@ -3,7 +3,7 @@
 set -euo pipefail
 
 echo "=================================================="
-echo "    Arch Linux ZFS Automated Installer            "
+echo "    Arch Linux Automated System Installer         "
 echo "=================================================="
 
 # --------------------------------------------------
@@ -18,8 +18,8 @@ if [[ ! -b "$DISK" ]]; then
     exit 1
 fi
 
-read -rp "Enter Hostname [arch-zfs]: " HOSTNAME
-HOSTNAME=${HOSTNAME:-arch-zfs}
+read -rp "Enter Hostname [arch-system]: " HOSTNAME
+HOSTNAME=${HOSTNAME:-arch-system}
 
 read -rp "Enter Timezone [Europe/Berlin]: " TIMEZONE
 TIMEZONE=${TIMEZONE:-Europe/Berlin}
@@ -49,42 +49,67 @@ while true; do
     echo "Error: User passwords do not match or were empty. Please try again."
 done
 
-# Bootloader Selection
+# Filesystem Selection
 echo ""
-echo "Select primary bootloader strategy:"
-echo "1) ZFSBootMenu (Recommended for pure ZFS & snapshots)"
-echo "2) GRUB (Best for traditional Dual-Boot auto-detection via os-prober)"
-echo "3) systemd-boot (Fast, minimal EFI boot manager)"
-read -rp "Choice [1-3] (Default: 1): " BOOTLOADER_CHOICE
-BOOTLOADER_CHOICE=${BOOTLOADER_CHOICE:-1}
+echo "Select Root Filesystem Type:"
+echo "1) ZFS (Advanced snapshots, pool management & Boot Environments)"
+echo "2) ext4 (Standard Linux filesystem)"
+echo "3) btrfs (Modern Linux filesystem with subvolumes)"
+read -rp "Choice [1-3] (Default: 1): " FS_CHOICE
+FS_CHOICE=${FS_CHOICE:-1}
+
+# Bootloader Selection based on Filesystem
+echo ""
+if [[ "$FS_CHOICE" == "1" ]]; then
+    echo "Select primary bootloader strategy:"
+    echo "1) ZFSBootMenu (Recommended & Default for ZFS)"
+    echo "2) GRUB"
+    echo "3) systemd-boot"
+    read -rp "Choice [1-3] (Default: 1): " BOOTLOADER_CHOICE
+    BOOTLOADER_CHOICE=${BOOTLOADER_CHOICE:-1}
+else
+    echo "Select primary bootloader strategy:"
+    echo "1) GRUB (Recommended for Dual-Boot & standard partitions)"
+    echo "2) systemd-boot (Fast, minimal EFI manager)"
+    read -rp "Choice [1-2] (Default: 1): " NON_ZFS_BL_CHOICE
+    NON_ZFS_BL_CHOICE=${NON_ZFS_BL_CHOICE:-1}
+    if [[ "$NON_ZFS_BL_CHOICE" == "1" ]]; then
+        BOOTLOADER_CHOICE="2"
+    else
+        BOOTLOADER_CHOICE="3"
+    fi
+fi
 
 # Dual Boot Check
 read -rp "Are you dual-booting with an existing Windows installation? (y/N): " DUAL_BOOT
 DUAL_BOOT=$(echo "$DUAL_BOOT" | tr '[:upper:]' '[:lower:]')
 
-# Native ZFS Encryption Check
-read -rp "Enable Native ZFS Encryption? (y/N): " ENABLE_ENC
-ENABLE_ENC=$(echo "$ENABLE_ENC" | tr '[:upper:]' '[:lower:]')
-
+# Native ZFS Encryption Check (Only if ZFS is selected)
+ENABLE_ENC="n"
 ZFS_PASS=""
-if [[ "$ENABLE_ENC" == "y" || "$ENABLE_ENC" == "yes" ]]; then
-    while true; do
-        read -rsp "Enter ZFS Encryption Passphrase: " ZFS_PASS; echo
-        read -rsp "Confirm ZFS Encryption Passphrase: " ZFS_PASS_CONFIRM; echo
-        if [[ "$ZFS_PASS" == "$ZFS_PASS_CONFIRM" && -n "$ZFS_PASS" ]]; then
-            break
-        fi
-        echo "Error: ZFS Passphrases do not match or were empty. Please try again."
-    done
+if [[ "$FS_CHOICE" == "1" ]]; then
+    read -rp "Enable Native ZFS Encryption? (y/N): " ENABLE_ENC
+    ENABLE_ENC=$(echo "$ENABLE_ENC" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$ENABLE_ENC" == "y" || "$ENABLE_ENC" == "yes" ]]; then
+        while true; do
+            read -rsp "Enter ZFS Encryption Passphrase: " ZFS_PASS; echo
+            read -rsp "Confirm ZFS Encryption Passphrase: " ZFS_PASS_CONFIRM; echo
+            if [[ "$ZFS_PASS" == "$ZFS_PASS_CONFIRM" && -n "$ZFS_PASS" ]]; then
+                break
+            fi
+            echo "Error: ZFS Passphrases do not match or were empty. Please try again."
+        done
+    fi
 fi
 
 POOL_NAME="zroot"
 
 echo ""
 echo "=================================================="
-echo "WARNING: Target ZFS Partition on $DISK will be configured!"
-echo "Target Pool: $POOL_NAME"
-echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED' || echo 'DISABLED')"
+echo "WARNING: Target Partitions on $DISK will be configured!"
+echo "Filesystem:  $([[ "$FS_CHOICE" == "1" ]] && echo 'ZFS' || ([[ "$FS_CHOICE" == "2" ]] && echo 'ext4' || echo 'btrfs'))"
+echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (ZFS)' || echo 'DISABLED')"
 echo "Username:    $USERNAME"
 echo "Timezone:    $TIMEZONE"
 echo "Bootloader:  $([[ "$BOOTLOADER_CHOICE" == "2" ]] && echo 'GRUB' || ([[ "$BOOTLOADER_CHOICE" == "3" ]] && echo 'systemd-boot' || echo 'ZFSBootMenu'))"
@@ -110,9 +135,8 @@ done
 
 if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     echo "Dual-boot detected. Preserving existing Windows EFI / NTFS partitions."
-    # If keeping Windows, we don't wipe the disk entirely—instead, prompt for target ZFS partition or partition cleanly after Windows
     sgdisk -n 0:0:+512M -t 0:ef00 -c 0:"Arch-EFI" "$DISK" || true
-    sgdisk -n 0:0:0     -t 0:bf00 -c 0:"ZFS-partition" "$DISK" || true
+    sgdisk -n 0:0:0     -t 0:8300 -c 0:"Arch-Root" "$DISK" || true
 else
     # Full disk wipe
     blkdiscard -f "$DISK" 2>/dev/null || true
@@ -121,75 +145,95 @@ else
     wipefs --all --force "$DISK"
     sgdisk --zap-all "$DISK"
     
-    # Create EFI Partition (512M) and ZFS Partition (Remaining space)
+    PART_TYPE="8300"
+    if [[ "$FS_CHOICE" == "1" ]]; then PART_TYPE="bf00"; fi
+
     sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI-system" "$DISK"
-    sgdisk -n 2:0:0     -t 2:bf00 -c 2:"ZFS-partition" "$DISK"
+    sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
 fi
 
 partprobe "$DISK"
 sleep 2
 
-# Handle partition naming scheme (nvme0n1p1 vs sda1)
+# Partition naming scheme
 if [[ "$DISK" =~ "nvme" || "$DISK" =~ "mmcblk" ]]; then
     EFI_PART="${DISK}p1"
-    ZFS_PART="${DISK}p2"
+    ROOT_PART="${DISK}p2"
 else
     EFI_PART="${DISK}1"
-    ZFS_PART="${DISK}2"
+    ROOT_PART="${DISK}2"
 fi
 
 echo "[2/7] Formatting EFI partition..."
 mkfs.vfat -F32 "$EFI_PART"
 
 # --------------------------------------------------
-# 3. ZFS Pool & Datasets Setup
+# 3. Filesystem Setup
 # --------------------------------------------------
-echo "[3/7] Creating ZFS Pool..."
-zgenhostid -f 0x00babaf1
+echo "[3/7] Setting up root filesystem..."
 
-POOL_OPTS=(
-    -o ashift=12
-    -o autotrim=on
-    -O acltype=posixacl
-    -O xattr=sa
-    -O dnodesize=auto
-    -O normalization=formD
-    -O relatime=on
-    -O canmount=off
-    -O mountpoint=none
-    -R /mnt
-)
+if [[ "$FS_CHOICE" == "1" ]]; then
+    # ZFS Setup
+    zgenhostid -f 0x00babaf1
 
-if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-    POOL_OPTS+=(
-        -O encryption=aes-256-gcm
-        -O keyformat=passphrase
-        -O keylocation=prompt
+    POOL_OPTS=(
+        -o ashift=12
+        -o autotrim=on
+        -O acltype=posixacl
+        -O xattr=sa
+        -O dnodesize=auto
+        -O normalization=formD
+        -O relatime=on
+        -O canmount=off
+        -O mountpoint=none
+        -R /mnt
     )
-    echo "$ZFS_PASS" | zpool create "${POOL_OPTS[@]}" "$POOL_NAME" "$ZFS_PART"
-else
-    zpool create "${POOL_OPTS[@]}" "$POOL_NAME" "$ZFS_PART"
-fi
 
-echo "Creating ZFS Datasets..."
-zfs create -o mountpoint=none "$POOL_NAME/ROOT"
-zfs create -o mountpoint=/ "$POOL_NAME/ROOT/default"
-zfs create -o mountpoint=/home "$POOL_NAME/home"
+    if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
+        POOL_OPTS+=(
+            -O encryption=aes-256-gcm
+            -O keyformat=passphrase
+            -O keylocation=prompt
+        )
+        echo "$ZFS_PASS" | zpool create "${POOL_OPTS[@]}" "$POOL_NAME" "$ROOT_PART"
+    else
+        zpool create "${POOL_OPTS[@]}" "$POOL_NAME" "$ROOT_PART"
+    fi
 
-# Set bootfs property
-zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
+    echo "Creating ZFS Datasets..."
+    zfs create -o mountpoint=none "$POOL_NAME/ROOT"
+    zfs create -o mountpoint=/ "$POOL_NAME/ROOT/default"
+    zfs create -o mountpoint=/home "$POOL_NAME/home"
 
-# Export and re-import pool
-zpool export "$POOL_NAME"
-if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-    echo "$ZFS_PASS" | zpool import -N -R /mnt "$POOL_NAME"
-    echo "$ZFS_PASS" | zfs load-key "$POOL_NAME"
-    zfs mount "$POOL_NAME/ROOT/default"
-    zfs mount "$POOL_NAME/home"
-else
-    zpool import -N -R /mnt "$POOL_NAME"
-    zfs mount "$POOL_NAME/ROOT/default"
-    zfs mount "$POOL_NAME/home"
+    zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
+
+    zpool export "$POOL_NAME"
+    if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
+        echo "$ZFS_PASS" | zpool import -N -R /mnt "$POOL_NAME"
+        echo "$ZFS_PASS" | zfs load-key "$POOL_NAME"
+        zfs mount "$POOL_NAME/ROOT/default"
+        zfs mount "$POOL_NAME/home"
+    else
+        zpool import -N -R /mnt "$POOL_NAME"
+        zfs mount "$POOL_NAME/ROOT/default"
+        zfs mount "$POOL_NAME/home"
+    fi
+
+elif [[ "$FS_CHOICE" == "2" ]]; then
+    # ext4 Setup
+    mkfs.ext4 -F "$ROOT_PART"
+    mount "$ROOT_PART" /mnt
+
+elif [[ "$FS_CHOICE" == "3" ]]; then
+    # btrfs Setup
+    mkfs.btrfs -f "$ROOT_PART"
+    mount "$ROOT_PART" /mnt
+    btrfs subvolume create /mnt/@
+    btrfs subvolume create /mnt/@home
+    umount /mnt
+    mount -o compress=zstd,subvol=@ "$ROOT_PART" /mnt
+    mkdir -p /mnt/home
+    mount -o compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
 fi
 
 mkdir -p /mnt/boot
@@ -199,7 +243,13 @@ mount "$EFI_PART" /mnt/boot
 # 4. Pacstrap Base System
 # --------------------------------------------------
 echo "[4/7] Installing base system and packages..."
-PACMAN_PKGS=(base linux linux-firmware zfs-linux sudo nano networkmanager efibootmgr git ansible)
+PACMAN_PKGS=(base linux linux-firmware sudo nano networkmanager efibootmgr git ansible)
+
+if [[ "$FS_CHOICE" == "1" ]]; then
+    PACMAN_PKGS+=(zfs-linux)
+elif [[ "$FS_CHOICE" == "3" ]]; then
+    PACMAN_PKGS+=(btrfs-progs)
+fi
 
 if [[ "$BOOTLOADER_CHOICE" == "2" || "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     PACMAN_PKGS+=(grub os-prober ntfs-3g)
@@ -208,7 +258,10 @@ fi
 pacstrap -K /mnt "${PACMAN_PKGS[@]}"
 
 genfstab -U /mnt >> /mnt/etc/fstab
-cp /etc/hostid /mnt/etc/hostid
+
+if [[ "$FS_CHOICE" == "1" ]]; then
+    cp /etc/hostid /mnt/etc/hostid
+fi
 
 # --------------------------------------------------
 # 5. System Configuration inside Chroot
@@ -249,16 +302,20 @@ echo "Cloning Ansible repository into /home/$USERNAME/ansible..."
 git clone https://github.com/uarslandev/ansible.git "/home/$USERNAME/ansible"
 chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/ansible"
 
-# ZFS Services
+# Services
 systemctl enable NetworkManager
-systemctl enable zfs-import-scan.service
-systemctl enable zfs-mount.service
-systemctl enable zfs-zed.service
-systemctl enable zfs.target
 
-# Initramfs Hooks for ZFS
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
-mkinitcpio -P
+if [[ "$FS_CHOICE" == "1" ]]; then
+    systemctl enable zfs-import-scan.service
+    systemctl enable zfs-mount.service
+    systemctl enable zfs-zed.service
+    systemctl enable zfs.target
+
+    sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
+    mkinitcpio -P
+else
+    mkinitcpio -P
+fi
 
 # --------------------------------------------------
 # Bootloader Setup Strategy
@@ -266,7 +323,10 @@ mkinitcpio -P
 if [[ "$BOOTLOADER_CHOICE" == "2" ]]; then
     echo "Configuring GRUB Bootloader..."
     grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
-    sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw"/' /etc/default/grub
+    
+    if [[ "$FS_CHOICE" == "1" ]]; then
+        sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw"/' /etc/default/grub
+    fi
 
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
         echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
@@ -283,11 +343,14 @@ timeout 5
 console-mode max
 LOADER
 
+    CMDLINE="rw"
+    if [[ "$FS_CHOICE" == "1" ]]; then CMDLINE="zfs=$POOL_NAME/ROOT/default rw"; fi
+
     cat <<ENTRY > /boot/loader/entries/arch.conf
-title   Arch Linux (ZFS)
+title   Arch Linux
 linux   /vmlinuz-linux
 initrd  /initramfs-linux.img
-options zfs=$POOL_NAME/ROOT/default rw
+options $CMDLINE
 ENTRY
 
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
@@ -298,6 +361,7 @@ WINENTRY
     fi
 
 else
+    # Default ZFSBootMenu Setup
     echo "Configuring ZFSBootMenu..."
     mkdir -p /boot/EFI/zfsbootmenu
     curl -sL "https://get.zfsbootmenu.org/latest.tar.gz" | tar -xz -C /tmp
@@ -312,12 +376,14 @@ fi
 CHROOT_SCRIPT
 
 # --------------------------------------------------
-# 6. Set Bootloader Pool Properties
+# 6. Set Bootloader Pool Properties (ZFS Only)
 # --------------------------------------------------
-echo "[6/7] Setting pool boot properties..."
-zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
-zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
-zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
+if [[ "$FS_CHOICE" == "1" ]]; then
+    echo "[6/7] Setting pool boot properties..."
+    zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
+    zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
+    zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
+fi
 
 read -rp "Do you want to run Ansible to set up the machine now? (y/N): " RUN_ANSIBLE
 RUN_ANSIBLE=$(echo "$RUN_ANSIBLE" | tr '[:upper:]' '[:lower:]')
@@ -344,10 +410,14 @@ fi
 # --------------------------------------------------
 # 7. Clean Up & Unmount
 # --------------------------------------------------
-echo "[7/7] Unmounting partitions and exporting pool..."
+echo "[7/7] Unmounting partitions..."
 umount /mnt/boot
-zfs unmount -a
-zpool export "$POOL_NAME"
+if [[ "$FS_CHOICE" == "1" ]]; then
+    zfs unmount -a
+    zpool export "$POOL_NAME"
+else
+    umount -R /mnt
+fi
 
 echo "=================================================="
 echo " Installation Complete! You can now reboot.      "
