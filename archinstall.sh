@@ -7,7 +7,7 @@ echo "    Arch Linux Automated System Installer         "
 echo "=================================================="
 
 # --------------------------------------------------
-# 1. Interactive Inputs
+# 1. Interactive Inputs (All Prompts Upfront)
 # --------------------------------------------------
 lsblk -d -n -o NAME,SIZE,TYPE,MODEL | grep disk
 echo ""
@@ -262,6 +262,9 @@ PACMAN_PKGS=(base linux linux-firmware sudo nano networkmanager efibootmgr git a
 
 if [[ "$FS_CHOICE" == "1" ]]; then
     PACMAN_PKGS+=(zfs-linux)
+    if [[ "$BOOTLOADER_CHOICE" == "1" ]]; then
+        PACMAN_PKGS+=(zfsbootmenu)
+    fi
 elif [[ "$FS_CHOICE" == "3" ]]; then
     PACMAN_PKGS+=(btrfs-progs)
 fi
@@ -373,23 +376,29 @@ WINENTRY
     fi
 
 else
-    # Default ZFSBootMenu Setup
     echo "Configuring ZFSBootMenu..."
     mkdir -p /boot/EFI/zfsbootmenu /boot/EFI/BOOT
-    
-    curl -fsL "https://get.zfsbootmenu.org/latest.tar.gz" | tar -xz -C /tmp
-    EFISTUB=\$(find /tmp -name "zfsbootmenu-*.EFI" | head -n 1)
 
-    if [[ -f "\$EFISTUB" ]]; then
-        cp "\$EFISTUB" /boot/EFI/zfsbootmenu/zfsbootmenu.efi
-        # Copy to default UEFI fallback location so motherboards always boot it
-        cp "\$EFISTUB" /boot/EFI/BOOT/BOOTX64.EFI
-        
-        efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
-    else
-        echo "Error: Failed to fetch ZFSBootMenu EFI stub."
-        exit 1
+    # Locate package-installed EFI stub or generate EFI release
+    FOUND_EFI=""
+    if [[ -f /usr/share/zfsbootmenu/zfsbootmenu.efi ]]; then
+        FOUND_EFI="/usr/share/zfsbootmenu/zfsbootmenu.efi"
+    elif [[ -f /boot/vmlinuz-linux ]]; then
+        # Fallback build via generate-zbm
+        generate-zbm -p /boot/EFI/zfsbootmenu || true
+        FOUND_EFI=\$(find /boot/EFI/zfsbootmenu -name "*.efi" -o -name "*.EFI" | head -n 1)
     fi
+
+    if [[ -z "\$FOUND_EFI" || ! -f "\$FOUND_EFI" ]]; then
+        # Fallback fetch if package binary is not in standard path
+        curl -fsSL -o /boot/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi/zfsbootmenu.EFI"
+        FOUND_EFI="/boot/EFI/zfsbootmenu/zfsbootmenu.efi"
+    fi
+
+    cp "\$FOUND_EFI" /boot/EFI/zfsbootmenu/zfsbootmenu.efi
+    cp "\$FOUND_EFI" /boot/EFI/BOOT/BOOTX64.EFI
+
+    efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
 fi
 
 CHROOT_SCRIPT
