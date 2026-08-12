@@ -49,6 +49,20 @@ while true; do
     echo "Error: User passwords do not match or were empty. Please try again."
 done
 
+# Bootloader Selection
+echo ""
+echo "Select primary bootloader strategy:"
+echo "1) ZFSBootMenu (Recommended for pure ZFS & snapshots)"
+echo "2) GRUB (Best for traditional Dual-Boot auto-detection via os-prober)"
+echo "3) systemd-boot (Fast, minimal EFI boot manager)"
+read -rp "Choice [1-3] (Default: 1): " BOOTLOADER_CHOICE
+BOOTLOADER_CHOICE=${BOOTLOADER_CHOICE:-1}
+
+# Dual Boot Check
+read -rp "Are you dual-booting with an existing Windows installation? (y/N): " DUAL_BOOT
+DUAL_BOOT=$(echo "$DUAL_BOOT" | tr '[:upper:]' '[:lower:]')
+
+# Native ZFS Encryption Check
 read -rp "Enable Native ZFS Encryption? (y/N): " ENABLE_ENC
 ENABLE_ENC=$(echo "$ENABLE_ENC" | tr '[:upper:]' '[:lower:]')
 
@@ -68,11 +82,13 @@ POOL_NAME="zroot"
 
 echo ""
 echo "=================================================="
-echo "WARNING: ALL DATA AND PARTITIONS ON $DISK WILL BE DELETED!"
+echo "WARNING: Target ZFS Partition on $DISK will be configured!"
 echo "Target Pool: $POOL_NAME"
 echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED' || echo 'DISABLED')"
 echo "Username:    $USERNAME"
 echo "Timezone:    $TIMEZONE"
+echo "Bootloader:  $([[ "$BOOTLOADER_CHOICE" == "2" ]] && echo 'GRUB' || ([[ "$BOOTLOADER_CHOICE" == "3" ]] && echo 'systemd-boot' || echo 'ZFSBootMenu'))"
+echo "Dual-Boot:   $([[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo 'YES (Windows)' || echo 'NO')"
 echo "Git Repo:    https://github.com/uarslandev/ansible.git"
 echo "=================================================="
 read -rp "Are you sure you want to proceed? (type 'YES'): " CONFIRM
@@ -84,38 +100,34 @@ fi
 # --------------------------------------------------
 # 2. Disk Wipe & Partitioning
 # --------------------------------------------------
-echo "[1/7] Wiping disk metadata, partition tables, and headers..."
+echo "[1/7] Preparing disk partitions..."
 
-# Unmount any active mounts or swap on the target disk
+# Unmount active mounts/swap
 swapoff -a || true
 for part in $(lsblk -l -n -o NAME "$DISK" | tail -n +2); do
     umount -l "/dev/$part" 2>/dev/null || true
 done
 
-# Issue BLKDISCARD if supported (instant wipe for NVMe/SSDs)
-blkdiscard -f "$DISK" 2>/dev/null || true
-
-# Destroy ZFS labels if any prior zpool existed on the disk
-zpool labelclear -f "$DISK" 2>/dev/null || true
-
-# Zero out GPT/MBR partition tables at head and tail of drive
-dd if=/dev/zero of="$DISK" bs=1M count=100 status=none conv=fsync
-SECTORS=$(blockdev --getsz "$DISK" 2>/dev/null || echo 0)
-if [[ "$SECTORS" -gt 2048 ]]; then
-    SEEK_SECTOR=$((SECTORS - 2048))
-    dd if=/dev/zero of="$DISK" bs=512 count=2048 seek="$SEEK_SECTOR" status=none conv=fsync 2>/dev/null || true
+if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
+    echo "Dual-boot detected. Preserving existing Windows EFI / NTFS partitions."
+    # If keeping Windows, we don't wipe the disk entirely—instead, prompt for target ZFS partition or partition cleanly after Windows
+    sgdisk -n 0:0:+512M -t 0:ef00 -c 0:"Arch-EFI" "$DISK" || true
+    sgdisk -n 0:0:0     -t 0:bf00 -c 0:"ZFS-partition" "$DISK" || true
+else
+    # Full disk wipe
+    blkdiscard -f "$DISK" 2>/dev/null || true
+    zpool labelclear -f "$DISK" 2>/dev/null || true
+    dd if=/dev/zero of="$DISK" bs=1M count=100 status=none conv=fsync
+    wipefs --all --force "$DISK"
+    sgdisk --zap-all "$DISK"
+    
+    # Create EFI Partition (512M) and ZFS Partition (Remaining space)
+    sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI-system" "$DISK"
+    sgdisk -n 2:0:0     -t 2:bf00 -c 2:"ZFS-partition" "$DISK"
 fi
 
-# Wipe filesystem signatures and zap GPT structures
-wipefs --all --force "$DISK"
-sgdisk --zap-all "$DISK"
 partprobe "$DISK"
 sleep 2
-
-echo "Partitioning clean target disk..."
-# Create EFI Partition (512M) and ZFS Partition (Remaining space)
-sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI-system" "$DISK"
-sgdisk -n 2:0:0     -t 2:bf00 -c 2:"ZFS-partition" "$DISK"
 
 # Handle partition naming scheme (nvme0n1p1 vs sda1)
 if [[ "$DISK" =~ "nvme" || "$DISK" =~ "mmcblk" ]]; then
@@ -125,9 +137,6 @@ else
     EFI_PART="${DISK}1"
     ZFS_PART="${DISK}2"
 fi
-
-partprobe "$DISK"
-sleep 2
 
 echo "[2/7] Formatting EFI partition..."
 mkfs.vfat -F32 "$EFI_PART"
@@ -170,7 +179,7 @@ zfs create -o mountpoint=/home "$POOL_NAME/home"
 # Set bootfs property
 zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
 
-# Export and re-import pool to verify mount state
+# Export and re-import pool
 zpool export "$POOL_NAME"
 if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
     echo "$ZFS_PASS" | zpool import -N -R /mnt "$POOL_NAME"
@@ -190,11 +199,15 @@ mount "$EFI_PART" /mnt/boot
 # 4. Pacstrap Base System
 # --------------------------------------------------
 echo "[4/7] Installing base system and packages..."
-pacstrap -K /mnt base linux linux-firmware zfs-linux sudo nano networkmanager grub efibootmgr git ansible
+PACMAN_PKGS=(base linux linux-firmware zfs-linux sudo nano networkmanager efibootmgr git ansible)
+
+if [[ "$BOOTLOADER_CHOICE" == "2" || "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
+    PACMAN_PKGS+=(grub os-prober ntfs-3g)
+fi
+
+pacstrap -K /mnt "${PACMAN_PKGS[@]}"
 
 genfstab -U /mnt >> /mnt/etc/fstab
-
-# Copy hostid to target system
 cp /etc/hostid /mnt/etc/hostid
 
 # --------------------------------------------------
@@ -243,23 +256,57 @@ systemctl enable zfs-mount.service
 systemctl enable zfs-zed.service
 systemctl enable zfs.target
 
-# Standard initramfs Hooks for ZFS (Explicitly omit 'fsck')
+# Initramfs Hooks for ZFS
 sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
-# Bootloader Setup (ZFSBootMenu)
-mkdir -p /boot/EFI/zfsbootmenu
-curl -sL "https://get.zfsbootmenu.org/latest.tar.gz" | tar -xz -C /tmp
-EFISTUB=\$(find /tmp -name "zfsbootmenu-*.EFI" | head -n 1)
-
-if [[ -f "\$EFISTUB" ]]; then
-    cp "\$EFISTUB" /boot/EFI/zfsbootmenu/zfsbootmenu.efi
-    efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose
-else
-    echo "Falling back to GRUB with ZFS..."
+# --------------------------------------------------
+# Bootloader Setup Strategy
+# --------------------------------------------------
+if [[ "$BOOTLOADER_CHOICE" == "2" ]]; then
+    echo "Configuring GRUB Bootloader..."
     grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
-    sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default"/' /etc/default/grub
+    sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw"/' /etc/default/grub
+
+    if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
+        echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
+    fi
     grub-mkconfig -o /boot/grub/grub.cfg
+
+elif [[ "$BOOTLOADER_CHOICE" == "3" ]]; then
+    echo "Configuring systemd-boot..."
+    bootctl install --esp-path=/boot
+
+    cat <<LOADER > /boot/loader/loader.conf
+default arch.conf
+timeout 5
+console-mode max
+LOADER
+
+    cat <<ENTRY > /boot/loader/entries/arch.conf
+title   Arch Linux (ZFS)
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options zfs=$POOL_NAME/ROOT/default rw
+ENTRY
+
+    if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
+        cat <<WINENTRY > /boot/loader/entries/windows.conf
+title   Windows Boot Manager
+efi     /EFI/Microsoft/Boot/bootmgfw.efi
+WINENTRY
+    fi
+
+else
+    echo "Configuring ZFSBootMenu..."
+    mkdir -p /boot/EFI/zfsbootmenu
+    curl -sL "https://get.zfsbootmenu.org/latest.tar.gz" | tar -xz -C /tmp
+    EFISTUB=\$(find /tmp -name "zfsbootmenu-*.EFI" | head -n 1)
+
+    if [[ -f "\$EFISTUB" ]]; then
+        cp "\$EFISTUB" /boot/EFI/zfsbootmenu/zfsbootmenu.efi
+        efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose
+    fi
 fi
 
 CHROOT_SCRIPT
@@ -267,7 +314,7 @@ CHROOT_SCRIPT
 # --------------------------------------------------
 # 6. Set Bootloader Pool Properties
 # --------------------------------------------------
-echo "[6/7] Setting command line boot arguments and menu properties for ZFSBootMenu..."
+echo "[6/7] Setting pool boot properties..."
 zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
 zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
 zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
@@ -286,7 +333,7 @@ if [[ "$RUN_ANSIBLE" == "y" || "$RUN_ANSIBLE" == "yes" ]]; then
         elif [[ -f main.yml ]]; then
             su - $USERNAME -c 'cd ~/ansible && ansible-playbook main.yml --connection=local'
         else
-            echo 'No default playbook found (local.yml, site.yml, main.yml). Running ansible-playbook interactively:'
+            echo 'Running interactive playbook selection:'
             ls -la /home/$USERNAME/ansible
             read -rp 'Enter playbook filename to run (e.g., playbook.yml): ' PB_NAME
             su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PB_NAME --connection=local\"
