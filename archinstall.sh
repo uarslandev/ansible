@@ -21,26 +21,47 @@ fi
 read -rp "Enter Hostname [arch-zfs]: " HOSTNAME
 HOSTNAME=${HOSTNAME:-arch-zfs}
 
+read -rp "Enter Timezone [Europe/Berlin]: " TIMEZONE
+TIMEZONE=${TIMEZONE:-Europe/Berlin}
+
 read -rp "Enter Username: " USERNAME
 if [[ -z "$USERNAME" ]]; then
     echo "Error: Username cannot be empty."
     exit 1
 fi
 
-read -rsp "Enter Root Password: " ROOT_PASS; echo
-read -rsp "Enter User Password ($USERNAME): " USER_PASS; echo
+# Password prompts with confirmation
+while true; do
+    read -rsp "Enter Root Password: " ROOT_PASS; echo
+    read -rsp "Confirm Root Password: " ROOT_PASS_CONFIRM; echo
+    if [[ "$ROOT_PASS" == "$ROOT_PASS_CONFIRM" && -n "$ROOT_PASS" ]]; then
+        break
+    fi
+    echo "Error: Root passwords do not match or were empty. Please try again."
+done
+
+while true; do
+    read -rsp "Enter User Password ($USERNAME): " USER_PASS; echo
+    read -rsp "Confirm User Password ($USERNAME): " USER_PASS_CONFIRM; echo
+    if [[ "$USER_PASS" == "$USER_PASS_CONFIRM" && -n "$USER_PASS" ]]; then
+        break
+    fi
+    echo "Error: User passwords do not match or were empty. Please try again."
+done
 
 read -rp "Enable Native ZFS Encryption? (y/N): " ENABLE_ENC
 ENABLE_ENC=$(echo "$ENABLE_ENC" | tr '[:upper:]' '[:lower:]')
 
 ZFS_PASS=""
 if [[ "$ENABLE_ENC" == "y" || "$ENABLE_ENC" == "yes" ]]; then
-    read -rsp "Enter ZFS Encryption Passphrase: " ZFS_PASS; echo
-    read -rsp "Confirm ZFS Encryption Passphrase: " ZFS_PASS_CONFIRM; echo
-    if [[ "$ZFS_PASS" != "$ZFS_PASS_CONFIRM" ]]; then
-        echo "Error: ZFS Passphrases do not match."
-        exit 1
-    fi
+    while true; do
+        read -rsp "Enter ZFS Encryption Passphrase: " ZFS_PASS; echo
+        read -rsp "Confirm ZFS Encryption Passphrase: " ZFS_PASS_CONFIRM; echo
+        if [[ "$ZFS_PASS" == "$ZFS_PASS_CONFIRM" && -n "$ZFS_PASS" ]]; then
+            break
+        fi
+        echo "Error: ZFS Passphrases do not match or were empty. Please try again."
+    done
 fi
 
 POOL_NAME="zroot"
@@ -51,7 +72,7 @@ echo "WARNING: ALL DATA AND PARTITIONS ON $DISK WILL BE DELETED!"
 echo "Target Pool: $POOL_NAME"
 echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED' || echo 'DISABLED')"
 echo "Username:    $USERNAME"
-echo "Timezone:    Europe/Berlin"
+echo "Timezone:    $TIMEZONE"
 echo "Git Repo:    https://github.com/uarslandev/ansible.git"
 echo "=================================================="
 read -rp "Are you sure you want to proceed? (type 'YES'): " CONFIRM
@@ -169,7 +190,7 @@ mount "$EFI_PART" /mnt/boot
 # 4. Pacstrap Base System
 # --------------------------------------------------
 echo "[4/7] Installing base system and packages..."
-pacstrap -K /mnt base linux linux-firmware zfs-linux sudo nano networkmanager grub efibootmgr git
+pacstrap -K /mnt base linux linux-firmware zfs-linux sudo nano networkmanager grub efibootmgr git ansible
 
 genfstab -U /mnt >> /mnt/etc/fstab
 
@@ -185,7 +206,7 @@ cat <<CHROOT_SCRIPT | arch-chroot /mnt /bin/bash
 set -euo pipefail
 
 # Timezone & Locale
-ln -sf /usr/share/zoneinfo/Europe/Berlin /etc/localtime
+ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 hwclock --systohc
 echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
@@ -244,12 +265,37 @@ fi
 CHROOT_SCRIPT
 
 # --------------------------------------------------
-# 6. Set Bootloader Pool Properties & Clean Up
+# 6. Post-Install Optional Ansible Run
 # --------------------------------------------------
 echo "[6/7] Setting command line boot arguments for ZFS..."
 zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
 zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
 
+read -rp "Do you want to run Ansible to set up the machine now? (y/N): " RUN_ANSIBLE
+RUN_ANSIBLE=$(echo "$RUN_ANSIBLE" | tr '[:upper:]' '[:lower:]')
+
+if [[ "$RUN_ANSIBLE" == "y" || "$RUN_ANSIBLE" == "yes" ]]; then
+    echo "Running Ansible playbook inside chroot..."
+    arch-chroot /mnt /bin/bash -c "
+        cd /home/$USERNAME/ansible
+        if [[ -f local.yml ]]; then
+            su - $USERNAME -c 'cd ~/ansible && ansible-playbook local.yml --connection=local'
+        elif [[ -f site.yml ]]; then
+            su - $USERNAME -c 'cd ~/ansible && ansible-playbook site.yml --connection=local'
+        elif [[ -f main.yml ]]; then
+            su - $USERNAME -c 'cd ~/ansible && ansible-playbook main.yml --connection=local'
+        else
+            echo 'No default playbook found (local.yml, site.yml, main.yml). Running ansible-playbook interactively:'
+            ls -la /home/$USERNAME/ansible
+            read -rp 'Enter playbook filename to run (e.g., playbook.yml): ' PB_NAME
+            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PB_NAME --connection=local\"
+        fi
+    "
+fi
+
+# --------------------------------------------------
+# 7. Clean Up & Unmount
+# --------------------------------------------------
 echo "[7/7] Unmounting partitions and exporting pool..."
 umount /mnt/boot
 zfs unmount -a
