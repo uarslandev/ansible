@@ -105,6 +105,10 @@ fi
 
 POOL_NAME="zroot"
 
+# Kernel command line parameters
+CMDLINE="rw"
+if [[ "$FS_CHOICE" == "1" ]]; then CMDLINE="zfs=$POOL_NAME/ROOT/default rw"; fi
+
 echo ""
 echo "=================================================="
 echo "WARNING: Target Partitions on $DISK will be configured!"
@@ -342,9 +346,6 @@ default arch.conf
 timeout 5
 console-mode max
 LOADER
-
-    CMDLINE="rw"
-    if [[ "$FS_CHOICE" == "1" ]]; then CMDLINE="zfs=$POOL_NAME/ROOT/default rw"; fi
 
     cat <<ENTRY > /boot/loader/entries/arch.conf
 title   Arch Linux
