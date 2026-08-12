@@ -1,44 +1,63 @@
 ---
 # Packages installed via pacman on Arch Linux workstations
 system_packages:
+  - amd-ucode
+  - ark
+  - bluedevil
+  - broadcom-wl-dkms
   - btop
   - chezmoi
   - curl
+  - dkms
+  - dolphin
   - fastfetch
   - fd
-  - foot
   - fzf
   - gcc
   - git
-  - grim
+  - gwenview
   - htop
-  - i3status
+  - intel-ucode
+  - iwd
   - jq
-  - ly
+  - kate
+  - kde-cli-tools
+  - konsole
+  - kscreen
+  - linux
+  - linux-firmware
+  - linux-headers
+  - linux-lts
+  - linux-lts-headers
+  - linux-zen
+  - linux-zen-headers
   - make
   - neovim
+  - networkmanager
   - nodejs
   - npm
+  - plasma-meta
+  - plasma-nm
+  - plasma-pa
+  - powerdevil
   - python-pip
+  - qt6-wayland
   - ripgrep
-  - slurp
-  - sway
-  - swaybg
-  - swayidle
-  - swaylock
+  - sddm
+  - sddm-kcm
+  - sof-firmware
+  - spectacle
   - tar
-  - thunar
   - tmux
   - torbrowser-launcher
   - unzip
   - util-linux
-  - waybar
   - wget
-  - wl-clipboard
-  - wofi
-  - xdg-desktop-portal
-  - xdg-desktop-portal-wlr
-  - xorg-xwayland
+  - wireless-regdb
+  - wpa_supplicant
+  - xdg-desktop-portal-kde
+  - zfs-dkms
+  - zfs-utils
   - zsh
 
 # AUR packages installed via paru (when available)
@@ -48,11 +67,8 @@ aur_packages:
   - catppuccin-cursors-mocha
   - catppuccin-gtk-theme-mocha
   - paru
-  - paru-debug
   - tor-browser-alpha-bin
   - wireguard-go-git
-  - zfs-linux
-  - zfs-utils
   - zsh-autosuggestions-git
 
 # Versions for standalone DevOps tools

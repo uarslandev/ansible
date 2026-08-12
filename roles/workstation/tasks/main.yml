@@ -126,20 +126,31 @@
     mode: '0755'
 
 
-- name: Check if ly templated systemd unit file exists
-  ansible.builtin.stat:
-    path: /usr/lib/systemd/system/ly@.service
-  register: ly_service_unit
-
-- name: Enable and start ly on tty1
+- name: Enable NetworkManager service
   become: true
   ansible.builtin.systemd_service:
-    name: ly@tty1.service
+    name: NetworkManager.service
     enabled: true
     state: started
   when:
     - ansible_service_mgr == "systemd"
-    - ly_service_unit.stat.exists
+
+- name: Enable SDDM display manager service
+  become: true
+  ansible.builtin.systemd_service:
+    name: sddm.service
+    enabled: true
+  when:
+    - ansible_service_mgr == "systemd"
+
+- name: Set default systemd target to graphical.target
+  become: true
+  ansible.builtin.command:
+    cmd: systemctl set-default graphical.target
+  register: set_graphical_target
+  changed_when: set_graphical_target.rc == 0
+  when:
+    - ansible_service_mgr == "systemd"
 
 # ==============================================================================
 # Oh-My-Zsh & Powerlevel10k Automation

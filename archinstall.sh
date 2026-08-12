@@ -91,7 +91,7 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     read -rp "Enable Native ZFS Encryption? (y/N): " ENABLE_ENC
     ENABLE_ENC=$(echo "$ENABLE_ENC" | tr '[:upper:]' '[:lower:]')
 
-    if [[ "$ENABLE_ENC" == "y" || "$ENABLE_ENC" == "yes" ]]; then
+    if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
         while true; do
             read -rsp "Enter ZFS Encryption Passphrase: " ZFS_PASS; echo
             read -rsp "Confirm ZFS Encryption Passphrase: " ZFS_PASS_CONFIRM; echo
@@ -109,25 +109,27 @@ read -rp "Do you want to run Ansible to set up the machine right after installat
 RUN_ANSIBLE=$(echo "$RUN_ANSIBLE" | tr '[:upper:]' '[:lower:]')
 
 CUSTOM_PLAYBOOK=""
-if [[ "$RUN_ANSIBLE" == "y" || "$RUN_ANSIBLE" == "yes" ]]; then
+if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
     read -rp "Enter playbook filename if not default (leave empty for auto-detect local.yml/site.yml/main.yml): " CUSTOM_PLAYBOOK
 fi
 
 POOL_NAME="zroot"
 
 # Kernel command line parameters
-CMDLINE="rw"
-if [[ "$FS_CHOICE" == "1" ]]; then CMDLINE="zfs=$POOL_NAME/ROOT/default rw"; fi
+CMDLINE="rw quiet"
+if [[ "$FS_CHOICE" == "1" ]]; then CMDLINE="zfs=$POOL_NAME/ROOT/default rw quiet"; fi
 
 echo ""
 echo "=================================================="
 echo "WARNING: Target Partitions on $DISK will be configured!"
 echo "Filesystem:  $([[ "$FS_CHOICE" == "1" ]] && echo 'ZFS' || ([[ "$FS_CHOICE" == "2" ]] && echo 'ext4' || echo 'btrfs'))"
-echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (ZFS)' || echo 'DISABLED')"
+echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (ZFS - single password boot via initramfs keyfile)' || echo 'DISABLED')"
+echo "Kernels:     linux, linux-lts, linux-zen"
+echo "Desktop:     KDE Plasma + SDDM"
 echo "Username:    $USERNAME"
 echo "Timezone:    $TIMEZONE"
 echo "Bootloader:  $([[ "$BOOTLOADER_CHOICE" == "2" ]] && echo 'GRUB' || ([[ "$BOOTLOADER_CHOICE" == "3" ]] && echo 'systemd-boot' || echo 'ZFSBootMenu'))"
-echo "Dual-Boot:   $([[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo 'YES (Windows)' || echo 'NO')"
+echo "Dual-Boot:   $([[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo 'YES (Preserving Windows)' || echo 'NO')"
 echo "Run Ansible: $([[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]] && echo 'YES' || echo 'NO')"
 echo "Git Repo:    https://github.com/uarslandev/ansible.git"
 echo "=================================================="
@@ -144,14 +146,22 @@ echo "[1/7] Preparing disk partitions..."
 
 # Unmount active mounts/swap
 swapoff -a || true
-for part in $(lsblk -l -n -o NAME "$DISK" | tail -n +2); do
+for part in $(lsblk -l -n -o NAME "$DISK" 2>/dev/null | tail -n +2); do
     umount -l "/dev/$part" 2>/dev/null || true
 done
 
+PART_TYPE="8300"
+if [[ "$FS_CHOICE" == "1" ]]; then PART_TYPE="bf00"; fi
+
 if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     echo "Dual-boot detected. Preserving existing Windows EFI / NTFS partitions."
-    sgdisk -n 0:0:+512M -t 0:ef00 -c 0:"Arch-EFI" "$DISK" || true
-    sgdisk -n 0:0:0     -t 0:8300 -c 0:"Arch-Root" "$DISK" || true
+    sgdisk -n 0:0:+512M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
+    sgdisk -n 0:0:0     -t 0:"$PART_TYPE" -c 0:"Arch-Root" "$DISK"
+    partprobe "$DISK"
+    sleep 2
+
+    EFI_PART=$(lsblk -no NAME,PARTLABEL "$DISK" | grep "Arch-EFI" | awk '{print "/dev/"$1}' | head -n 1)
+    ROOT_PART=$(lsblk -no NAME,PARTLABEL "$DISK" | grep "Arch-Root" | awk '{print "/dev/"$1}' | head -n 1)
 else
     # Full disk wipe
     blkdiscard -f "$DISK" 2>/dev/null || true
@@ -160,24 +170,27 @@ else
     wipefs --all --force "$DISK"
     sgdisk --zap-all "$DISK"
     
-    PART_TYPE="8300"
-    if [[ "$FS_CHOICE" == "1" ]]; then PART_TYPE="bf00"; fi
-
     sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI-system" "$DISK"
     sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
+    partprobe "$DISK"
+    sleep 2
+
+    if [[ "$DISK" =~ "nvme" || "$DISK" =~ "mmcblk" ]]; then
+        EFI_PART="${DISK}p1"
+        ROOT_PART="${DISK}p2"
+    else
+        EFI_PART="${DISK}1"
+        ROOT_PART="${DISK}2"
+    fi
 fi
 
-partprobe "$DISK"
-sleep 2
-
-# Partition naming scheme
-if [[ "$DISK" =~ "nvme" || "$DISK" =~ "mmcblk" ]]; then
-    EFI_PART="${DISK}p1"
-    ROOT_PART="${DISK}p2"
-else
-    EFI_PART="${DISK}1"
-    ROOT_PART="${DISK}2"
+if [[ -z "${EFI_PART:-}" || -z "${ROOT_PART:-}" ]]; then
+    echo "Error: Could not determine partition nodes."
+    exit 1
 fi
+
+echo "Selected EFI Partition:  $EFI_PART"
+echo "Selected Root Partition: $ROOT_PART"
 
 echo "[2/7] Formatting EFI partition..."
 mkfs.vfat -F32 "$EFI_PART"
@@ -228,6 +241,13 @@ if [[ "$FS_CHOICE" == "1" ]]; then
         echo "$ZFS_PASS" | zfs load-key "$POOL_NAME"
         zfs mount "$POOL_NAME/ROOT/default"
         zfs mount "$POOL_NAME/home"
+
+        # Create keyfile to avoid entering passphrase twice at boot
+        echo "Creating initramfs ZFS decryption keyfile to prevent double passphrase prompts..."
+        mkdir -p /mnt/etc/zfs
+        dd if=/dev/urandom of=/mnt/etc/zfs/zroot.key bs=32 count=1 status=none
+        chmod 600 /mnt/etc/zfs/zroot.key
+        zfs set keylocation=file:///etc/zfs/zroot.key "$POOL_NAME"
     else
         zpool import -N -R /mnt "$POOL_NAME"
         zfs mount "$POOL_NAME/ROOT/default"
@@ -251,7 +271,7 @@ elif [[ "$FS_CHOICE" == "3" ]]; then
     mount -o compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
 fi
 
-# For ZFSBootMenu, mount EFI to /efi so /boot stays inside ZFS root
+# For ZFSBootMenu, mount EFI to /efi so /boot stays inside ZFS root dataset
 EFI_MOUNT_POINT="/boot"
 if [[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]]; then
     EFI_MOUNT_POINT="/efi"
@@ -261,13 +281,40 @@ mkdir -p "/mnt$EFI_MOUNT_POINT"
 mount "$EFI_PART" "/mnt$EFI_MOUNT_POINT"
 
 # --------------------------------------------------
-# 4. Pacstrap Base System
+# 4. Pacstrap Base System & Kernels
 # --------------------------------------------------
-echo "[4/7] Installing base system and packages..."
-PACMAN_PKGS=(base linux linux-firmware sudo nano networkmanager efibootmgr git ansible curl)
+echo "[4/7] Installing base system, kernels (linux, linux-lts, linux-zen), Wi-Fi firmware & KDE Plasma..."
+
+# Ensure archzfs repository is present in host pacman.conf if ZFS selected
+if [[ "$FS_CHOICE" == "1" ]]; then
+    if ! grep -q "\[archzfs\]" /etc/pacman.conf; then
+        echo "Adding archzfs repository to installer pacman configuration..."
+        pacman-key --recv-keys DDF7DB8173967019 2>/dev/null || true
+        pacman-key --lsign-key DDF7DB8173967019 2>/dev/null || true
+        cat <<'PACMAN_ZFS' >> /etc/pacman.conf
+
+[archzfs]
+SigLevel = Optional TrustAll
+Server = https://archzfs.com/$repo/$arch
+Server = https://zfs.fanet.ft/archzfs/$repo/$arch
+PACMAN_ZFS
+        pacman -Sy --noconfirm 2>/dev/null || true
+    fi
+fi
+
+PACMAN_PKGS=(
+    base sudo nano git ansible curl efibootmgr dkms
+    linux linux-headers
+    linux-lts linux-lts-headers
+    linux-zen linux-zen-headers
+    linux-firmware sof-firmware wireless-regdb broadcom-wl-dkms intel-ucode amd-ucode
+    networkmanager iwd wpa_supplicant
+    plasma-meta sddm sddm-kcm plasma-nm plasma-pa kscreen powerdevil kde-cli-tools bluedevil
+    konsole dolphin kate spectacle ark gwenview qt6-wayland xdg-desktop-portal-kde
+)
 
 if [[ "$FS_CHOICE" == "1" ]]; then
-    PACMAN_PKGS+=(zfs-linux)
+    PACMAN_PKGS+=(zfs-dkms zfs-utils)
 elif [[ "$FS_CHOICE" == "3" ]]; then
     PACMAN_PKGS+=(btrfs-progs)
 fi
@@ -325,16 +372,39 @@ chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/ansible"
 
 # Services
 systemctl enable NetworkManager
+systemctl enable sddm
+systemctl set-default graphical.target
 
 if [[ "$FS_CHOICE" == "1" ]]; then
+    # Ensure archzfs repo in target system pacman.conf
+    if ! grep -q "\[archzfs\]" /etc/pacman.conf; then
+        cat <<'PACMAN_ZFS_TARGET' >> /etc/pacman.conf
+
+[archzfs]
+SigLevel = Optional TrustAll
+Server = https://archzfs.com/\$repo/\$arch
+Server = https://zfs.fanet.ft/archzfs/\$repo/\$arch
+PACMAN_ZFS_TARGET
+    fi
+
     systemctl enable zfs-import-scan.service
     systemctl enable zfs-mount.service
     systemctl enable zfs-zed.service
     systemctl enable zfs.target
 
+    if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
+        sed -i 's/^FILES=.*/FILES=(\/etc\/zfs\/zroot.key)/' /etc/mkinitcpio.conf
+    fi
     sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
+
+    # Build DKMS modules for linux, linux-lts, linux-zen
+    echo "Building ZFS & DKMS modules for all installed kernels..."
+    dkms autoinstall || true
+
     mkinitcpio -P
 else
+    # Build DKMS modules for all installed kernels
+    dkms autoinstall || true
     mkinitcpio -P
 fi
 
@@ -346,7 +416,7 @@ if [[ "$BOOTLOADER_CHOICE" == "2" ]]; then
     grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --removable
     
     if [[ "$FS_CHOICE" == "1" ]]; then
-        sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw"/' /etc/default/grub
+        sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw quiet"/' /etc/default/grub
     fi
 
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
@@ -360,16 +430,31 @@ elif [[ "$BOOTLOADER_CHOICE" == "3" ]]; then
 
     cat <<LOADER > /boot/loader/loader.conf
 default arch.conf
-timeout 5
+timeout 10
 console-mode max
 LOADER
 
-    cat <<ENTRY > /boot/loader/entries/arch.conf
-title   Arch Linux
+    # Kernel entries for linux, linux-lts, and linux-zen
+    cat <<ENTRY_STD > /boot/loader/entries/arch.conf
+title   Arch Linux (Standard Kernel)
 linux   /vmlinuz-linux
 initrd  /initramfs-linux.img
 options $CMDLINE
-ENTRY
+ENTRY_STD
+
+    cat <<ENTRY_LTS > /boot/loader/entries/arch-lts.conf
+title   Arch Linux (LTS Kernel)
+linux   /vmlinuz-linux-lts
+initrd  /initramfs-linux-lts.img
+options $CMDLINE
+ENTRY_LTS
+
+    cat <<ENTRY_ZEN > /boot/loader/entries/arch-zen.conf
+title   Arch Linux (Zen Kernel)
+linux   /vmlinuz-linux-zen
+initrd  /initramfs-linux-zen.img
+options $CMDLINE
+ENTRY_ZEN
 
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
         cat <<WINENTRY > /boot/loader/entries/windows.conf
@@ -382,7 +467,7 @@ else
     echo "Configuring ZFSBootMenu..."
     mkdir -p /efi/EFI/zfsbootmenu /efi/EFI/BOOT
 
-    # Direct fetch of the compiled release EFI executable from zbm-dev
+    # Fetch compiled release EFI executable from zbm-dev
     echo "Downloading ZFSBootMenu EFI stub..."
     curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi" || \
     curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "https://github.com/zbm-dev/zfsbootmenu/releases/latest/download/zfsbootmenu-release-x86_64-v2.3.0.EFI"
@@ -399,16 +484,19 @@ fi
 CHROOT_SCRIPT
 
 # --------------------------------------------------
-# 6. Set Bootloader Pool Properties (ZFS Only) & Run Ansible
+# 6. Set Bootloader Pool Properties (ZFS Only) & Create Initial Snapshot
 # --------------------------------------------------
 if [[ "$FS_CHOICE" == "1" ]]; then
-    echo "[6/7] Setting pool boot properties..."
+    echo "[6/7] Setting pool boot properties & creating initial snapshot..."
     zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
     zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
-    zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
+    zfs set org.zfsbootmenu:commandline="rw quiet" "$POOL_NAME/ROOT"
+
+    # Take initial ZFS snapshot so snapshot boot selection is immediately active
+    zfs snapshot "$POOL_NAME/ROOT/default@initial-installation" || true
 fi
 
-if [[ "$RUN_ANSIBLE" == "y" || "$RUN_ANSIBLE" == "yes" ]]; then
+if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
     echo "Running Ansible playbook inside chroot..."
     
     if [[ -n "$CUSTOM_PLAYBOOK" ]]; then
