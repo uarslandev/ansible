@@ -43,9 +43,14 @@ system_packages:
 
 # AUR packages installed via paru (when available)
 aur_packages:
+  - ani-cli
   - antigravity-cli
+  - catppuccin-cursors-mocha
+  - catppuccin-gtk-theme-mocha
   - paru
   - paru-debug
+  - tor-browser-alpha-bin
+  - wireguard-go-git
   - zfs-linux
   - zfs-utils
   - zsh-autosuggestions-git
