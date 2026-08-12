@@ -3,7 +3,7 @@
 set -euo pipefail
 
 echo "=================================================="
-echo "    Arch Linux Automated System Installer         "
+echo "    Arch Linux Automated System Installer          "
 echo "=================================================="
 
 # --------------------------------------------------
@@ -124,7 +124,7 @@ echo "=================================================="
 echo "WARNING: Target Partitions on $DISK will be configured!"
 echo "Filesystem:  $([[ "$FS_CHOICE" == "1" ]] && echo 'ZFS' || ([[ "$FS_CHOICE" == "2" ]] && echo 'ext4' || echo 'btrfs'))"
 echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (ZFS - single password boot via ZFSBootMenu)' || echo 'DISABLED')"
-echo "Kernels:     linux, linux-lts, linux-zen"
+echo "Kernels:     linux, linux-lts"
 echo "Desktop:     KDE Plasma + SDDM"
 echo "Username:    $USERNAME"
 echo "Timezone:    $TIMEZONE"
@@ -283,7 +283,7 @@ mount "$EFI_PART" "/mnt$EFI_MOUNT_POINT"
 # --------------------------------------------------
 # 4. Pacstrap Base System & Kernels
 # --------------------------------------------------
-echo "[4/7] Installing base system, kernels (linux, linux-lts, linux-zen), Wi-Fi firmware & KDE Plasma..."
+echo "[4/7] Installing base system, kernels (linux, linux-lts), Wi-Fi firmware & KDE Plasma..."
 
 # Ensure archzfs repository is present in host pacman.conf if ZFS selected
 if [[ "$FS_CHOICE" == "1" ]]; then
@@ -306,7 +306,6 @@ PACMAN_PKGS=(
     base sudo nano git ansible curl efibootmgr dkms
     linux linux-headers
     linux-lts linux-lts-headers
-    linux-zen linux-zen-headers
     linux-firmware sof-firmware wireless-regdb broadcom-wl-dkms intel-ucode amd-ucode
     networkmanager iwd wpa_supplicant
     plasma-meta sddm sddm-kcm plasma-nm plasma-pa kscreen powerdevil kde-cli-tools bluedevil
@@ -396,13 +395,13 @@ PACMAN_ZFS_TARGET
     # Hook ordering: keyboard placed before autodetect as recommended by Arch Wiki
     sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect microcode modconf kms block zfs filesystems)/' /etc/mkinitcpio.conf
 
-    # Build DKMS modules for linux, linux-lts, linux-zen
-    echo "Building ZFS & DKMS modules for all installed kernels..."
+    # Build DKMS modules for linux and linux-lts
+    echo "Building ZFS & DKMS modules for installed kernels..."
     dkms autoinstall || true
 
     mkinitcpio -P
 else
-    # Build DKMS modules for all installed kernels
+    # Build DKMS modules for installed kernels
     dkms autoinstall || true
     mkinitcpio -P
 fi
@@ -433,7 +432,7 @@ timeout 10
 console-mode max
 LOADER
 
-    # Kernel entries for linux, linux-lts, and linux-zen
+    # Kernel entries for linux and linux-lts
     cat <<ENTRY_STD > /boot/loader/entries/arch.conf
 title   Arch Linux (Standard Kernel)
 linux   /vmlinuz-linux
@@ -447,13 +446,6 @@ linux   /vmlinuz-linux-lts
 initrd  /initramfs-linux-lts.img
 options $CMDLINE
 ENTRY_LTS
-
-    cat <<ENTRY_ZEN > /boot/loader/entries/arch-zen.conf
-title   Arch Linux (Zen Kernel)
-linux   /vmlinuz-linux-zen
-initrd  /initramfs-linux-zen.img
-options $CMDLINE
-ENTRY_ZEN
 
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
         cat <<WINENTRY > /boot/loader/entries/windows.conf
