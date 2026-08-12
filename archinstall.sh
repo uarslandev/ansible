@@ -175,7 +175,7 @@ echo ""
 log_info "Partitioning $DISK..."
 
 # Determine partition scheme based on disk type
-if [[ "$DISK" == "nvme" ]] || [[ "$DISK" == "mmc" ]]; then
+if [[ "$DISK" == *"nvme"* ]] || [[ "$DISK" == *"mmc"* ]]; then
     EFI_PART="${DISK}p1"
     ZFS_PART="${DISK}p2"
 else
