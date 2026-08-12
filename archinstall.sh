@@ -262,9 +262,6 @@ PACMAN_PKGS=(base linux linux-firmware sudo nano networkmanager efibootmgr git a
 
 if [[ "$FS_CHOICE" == "1" ]]; then
     PACMAN_PKGS+=(zfs-linux)
-    if [[ "$BOOTLOADER_CHOICE" == "1" ]]; then
-        PACMAN_PKGS+=(zfsbootmenu)
-    fi
 elif [[ "$FS_CHOICE" == "3" ]]; then
     PACMAN_PKGS+=(btrfs-progs)
 fi
@@ -379,26 +376,19 @@ else
     echo "Configuring ZFSBootMenu..."
     mkdir -p /boot/EFI/zfsbootmenu /boot/EFI/BOOT
 
-    # Locate package-installed EFI stub or generate EFI release
-    FOUND_EFI=""
-    if [[ -f /usr/share/zfsbootmenu/zfsbootmenu.efi ]]; then
-        FOUND_EFI="/usr/share/zfsbootmenu/zfsbootmenu.efi"
-    elif [[ -f /boot/vmlinuz-linux ]]; then
-        # Fallback build via generate-zbm
-        generate-zbm -p /boot/EFI/zfsbootmenu || true
-        FOUND_EFI=\$(find /boot/EFI/zfsbootmenu -name "*.efi" -o -name "*.EFI" | head -n 1)
+    # Direct fetch of the compiled release EFI executable from zbm-dev
+    echo "Downloading ZFSBootMenu EFI stub..."
+    curl -fsSL -L -o /boot/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi" || \
+    curl -fsSL -L -o /boot/EFI/zfsbootmenu/zfsbootmenu.efi "https://github.com/zbm-dev/zfsbootmenu/releases/latest/download/zfsbootmenu-release-x86_64-v2.3.0.EFI"
+
+    if [[ -s /boot/EFI/zfsbootmenu/zfsbootmenu.efi ]]; then
+        # Copy to UEFI default fallback location
+        cp /boot/EFI/zfsbootmenu/zfsbootmenu.efi /boot/EFI/BOOT/BOOTX64.EFI
+        efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
+    else
+        echo "Error: Failed to fetch ZFSBootMenu EFI binary."
+        exit 1
     fi
-
-    if [[ -z "\$FOUND_EFI" || ! -f "\$FOUND_EFI" ]]; then
-        # Fallback fetch if package binary is not in standard path
-        curl -fsSL -o /boot/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi/zfsbootmenu.EFI"
-        FOUND_EFI="/boot/EFI/zfsbootmenu/zfsbootmenu.efi"
-    fi
-
-    cp "\$FOUND_EFI" /boot/EFI/zfsbootmenu/zfsbootmenu.efi
-    cp "\$FOUND_EFI" /boot/EFI/BOOT/BOOTX64.EFI
-
-    efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
 fi
 
 CHROOT_SCRIPT
