@@ -123,7 +123,7 @@ echo ""
 echo "=================================================="
 echo "WARNING: Target Partitions on $DISK will be configured!"
 echo "Filesystem:  $([[ "$FS_CHOICE" == "1" ]] && echo 'ZFS' || ([[ "$FS_CHOICE" == "2" ]] && echo 'ext4' || echo 'btrfs'))"
-echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (ZFS - single password boot via initramfs keyfile)' || echo 'DISABLED')"
+echo "Encryption:  $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (ZFS - single password boot via ZFSBootMenu)' || echo 'DISABLED')"
 echo "Kernels:     linux, linux-lts, linux-zen"
 echo "Desktop:     KDE Plasma + SDDM"
 echo "Username:    $USERNAME"
@@ -235,24 +235,24 @@ if [[ "$FS_CHOICE" == "1" ]]; then
 
     zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
 
+    # Set cachefile location and export/import to build cache
+    zpool set cachefile=/etc/zfs/zpool.cache "$POOL_NAME"
+
     zpool export "$POOL_NAME"
     if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-        echo "$ZFS_PASS" | zpool import -N -R /mnt "$POOL_NAME"
+        echo "$ZFS_PASS" | zpool import -N -o cachefile=/etc/zfs/zpool.cache -R /mnt "$POOL_NAME"
         echo "$ZFS_PASS" | zfs load-key "$POOL_NAME"
         zfs mount "$POOL_NAME/ROOT/default"
         zfs mount "$POOL_NAME/home"
-
-        # Create keyfile to avoid entering passphrase twice at boot
-        echo "Creating initramfs ZFS decryption keyfile to prevent double passphrase prompts..."
-        mkdir -p /mnt/etc/zfs
-        dd if=/dev/urandom of=/mnt/etc/zfs/zroot.key bs=32 count=1 status=none
-        chmod 600 /mnt/etc/zfs/zroot.key
-        zfs set keylocation=file:///etc/zfs/zroot.key "$POOL_NAME"
     else
-        zpool import -N -R /mnt "$POOL_NAME"
+        zpool import -N -o cachefile=/etc/zfs/zpool.cache -R /mnt "$POOL_NAME"
         zfs mount "$POOL_NAME/ROOT/default"
         zfs mount "$POOL_NAME/home"
     fi
+
+    # Copy zpool.cache into target installation
+    mkdir -p /mnt/etc/zfs
+    cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
 
 elif [[ "$FS_CHOICE" == "2" ]]; then
     # ext4 Setup
@@ -325,6 +325,7 @@ fi
 
 pacstrap -K /mnt "${PACMAN_PKGS[@]}"
 
+# Generate fstab filtering non-legacy ZFS datasets
 genfstab -U /mnt >> /mnt/etc/fstab
 
 if [[ "$FS_CHOICE" == "1" ]]; then
@@ -342,7 +343,7 @@ set -euo pipefail
 # Timezone & Locale
 ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 hwclock --systohc
-echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+echo "en_US.UTF-8 UTF-8" >> /locale.gen || echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "KEYMAP=us" > /etc/vconsole.conf
@@ -387,15 +388,13 @@ Server = https://zfs.fanet.ft/archzfs/\$repo/\$arch
 PACMAN_ZFS_TARGET
     fi
 
-    systemctl enable zfs-import-scan.service
+    systemctl enable zfs-import-cache.service
     systemctl enable zfs-mount.service
     systemctl enable zfs-zed.service
     systemctl enable zfs.target
 
-    if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-        sed -i 's/^FILES=.*/FILES=(\/etc\/zfs\/zroot.key)/' /etc/mkinitcpio.conf
-    fi
-    sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
+    # Hook ordering: keyboard placed before autodetect as recommended by Arch Wiki
+    sed -i 's/^HOOKS=.*/HOOKS=(base udev keyboard autodetect microcode modconf kms block zfs filesystems)/' /etc/mkinitcpio.conf
 
     # Build DKMS modules for linux, linux-lts, linux-zen
     echo "Building ZFS & DKMS modules for all installed kernels..."
@@ -489,10 +488,15 @@ CHROOT_SCRIPT
 if [[ "$FS_CHOICE" == "1" ]]; then
     echo "[6/7] Setting pool boot properties & creating initial snapshot..."
     zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
-    zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
+    
+    # Enable the interactive menu explicitly and set a 10-second timeout
+    zpool set org.zfsbootmenu:enable_menu=on "$POOL_NAME"
+    zpool set org.zfsbootmenu:menu_timeout=10 "$POOL_NAME"
+    
+    # Kernel commandline passed down to kernel
     zfs set org.zfsbootmenu:commandline="rw quiet" "$POOL_NAME/ROOT"
 
-    # Take initial ZFS snapshot so snapshot boot selection is immediately active
+    # Take initial ZFS snapshot so snapshot boot selection is immediately active in ZBM
     zfs snapshot "$POOL_NAME/ROOT/default@initial-installation" || true
 fi
 
