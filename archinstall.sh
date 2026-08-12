@@ -243,8 +243,8 @@ systemctl enable zfs-mount.service
 systemctl enable zfs-zed.service
 systemctl enable zfs.target
 
-# Standard initramfs Hooks for ZFS
-sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems fsck)/' /etc/mkinitcpio.conf
+# Standard initramfs Hooks for ZFS (Explicitly omit 'fsck')
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
 # Bootloader Setup (ZFSBootMenu)
@@ -265,10 +265,11 @@ fi
 CHROOT_SCRIPT
 
 # --------------------------------------------------
-# 6. Post-Install Optional Ansible Run
+# 6. Set Bootloader Pool Properties
 # --------------------------------------------------
-echo "[6/7] Setting command line boot arguments for ZFS..."
+echo "[6/7] Setting command line boot arguments and menu properties for ZFSBootMenu..."
 zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
+zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
 zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
 
 read -rp "Do you want to run Ansible to set up the machine now? (y/N): " RUN_ANSIBLE
