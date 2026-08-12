@@ -458,10 +458,30 @@ else
     echo "Configuring ZFSBootMenu..."
     mkdir -p /efi/EFI/zfsbootmenu /efi/EFI/BOOT
 
-    # Fetch compiled release EFI executable from zbm-dev
     echo "Downloading ZFSBootMenu EFI stub..."
-    curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi" || \
-    curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "https://github.com/zbm-dev/zfsbootmenu/releases/latest/download/zfsbootmenu-release-x86_64-v2.3.0.EFI"
+
+    # 1. Try primary endpoint
+    if ! curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "https://get.zfsbootmenu.org/efi"; then
+        echo "get.zfsbootmenu.org unreachable or returned error. Fetching dynamic URL from GitHub API..."
+        
+        # 2. Dynamic GitHub API fallback
+        LATEST_URL=$(curl -s https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest \
+          | grep "browser_download_url.*vmlinuz.*EFI" \
+          | cut -d '"' -f 4 \
+          | head -n 1)
+
+        if [[ -z "$LATEST_URL" ]]; then
+            LATEST_URL=$(curl -s https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest \
+              | grep "browser_download_url.*\.EFI" \
+              | cut -d '"' -f 4 \
+              | head -n 1)
+        fi
+
+        if [[ -n "$LATEST_URL" ]]; then
+            echo "Downloading from GitHub release asset: $LATEST_URL"
+            curl -fsSL -L -o /efi/EFI/zfsbootmenu/zfsbootmenu.efi "$LATEST_URL"
+        fi
+    fi
 
     if [[ -s /efi/EFI/zfsbootmenu/zfsbootmenu.efi ]]; then
         cp /efi/EFI/zfsbootmenu/zfsbootmenu.efi /efi/EFI/BOOT/BOOTX64.EFI
