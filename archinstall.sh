@@ -74,10 +74,15 @@ esac
 
 POOL_NAME="zroot"
 
-# 2. Disk Preparation
-echo -e "\n${YELLOW}[1/6] Partitioning disk...${NC}"
+# 2. Disk Preparation & Wiping
+echo -e "\n${YELLOW}[1/6] Partitioning and cleaning disk...${NC}"
+
+# Safely destroy old pool if present in host memory
+zpool destroy -f "$POOL_NAME" 2>/dev/null || true
+
 sgdisk --zap-all "$TARGET_DISK"
 partprobe "$TARGET_DISK"
+sleep 1
 
 # Create 1GB EFI Partition (1) and ZFS Partition (2)
 sgdisk -n 1:0:+1G -t 1:ef00 -c 1:"EFI System Partition" "$TARGET_DISK"
@@ -95,13 +100,18 @@ else
     ZFS_PART="${TARGET_DISK}2"
 fi
 
-echo -e "${YELLOW}[2/6] Formatting EFI partition...${NC}"
+echo -e "${YELLOW}[2/6] Force-wiping old signatures and formatting EFI...${NC}"
+wipefs -a "$EFI_PART" || true
+wipefs -a "$ZFS_PART" || true
+zpool labelclear -f "$ZFS_PART" 2>/dev/null || true
+
 mkfs.vfat -F32 -n "EFI" "$EFI_PART"
 
 # 3. ZFS Pool & Dataset Creation
 echo -e "${YELLOW}[3/6] Creating ZFS Pool '$POOL_NAME'...${NC}"
 
 ZPOOL_OPTS=(
+    -f
     -o ashift=12
     -o autotrim=on
     -O acltype=posixacl
