@@ -138,14 +138,19 @@ fi
 echo -e "${YELLOW}Creating ZFS Datasets...${NC}"
 zfs create -o canmount=off -o mountpoint=none "$POOL_NAME/ROOT"
 zfs create -o mountpoint=/ -o canmount=noauto "$POOL_NAME/ROOT/default"
-zfs create -o mountpoint=/home "$POOL_NAME/home"
+zfs create -o mountpoint=/home -o canmount=on "$POOL_NAME/home"
 
 # Set ZFS-BootMenu parameters
 zfs set org.zfsbootmenu:commandline="rw quiet loglevel=3" "$POOL_NAME/ROOT"
 
-# Mount filesystems
+# Mount ROOT dataset under altroot /mnt
 zfs mount "$POOL_NAME/ROOT/default"
-zfs mount "$POOL_NAME/home"
+
+# Ensure /home is mounted cleanly under /mnt/home
+mkdir -p /mnt/home
+if ! mountpoint -q /mnt/home; then
+    zfs mount "$POOL_NAME/home" 2>/dev/null || true
+fi
 
 mkdir -p /mnt/boot/efi
 mount "$EFI_PART" /mnt/boot/efi
