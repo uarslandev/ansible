@@ -19,7 +19,7 @@
 
 - name: Calculate packages to auto-remove
   ansible.builtin.set_fact:
-    packages_to_remove: "{{ previous_pacman_packages | difference(system_packages) }}"
+    packages_to_remove: "{{ (previous_pacman_packages | difference(system_packages)) | difference(['tar', 'util-linux', 'wpa_supplicant', 'zfs-utils', 'base', 'base-devel', 'linux', 'systemd']) }}"
 
 - name: Auto-remove packages no longer listed in system_packages
   become: true

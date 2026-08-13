@@ -62,7 +62,7 @@ system_packages:
   - xdg-desktop-portal-kde
   - zsh
 
-# AUR packages installed via paru/yay
+# AUR packages installed via paru (when available)
 aur_packages:
   - ani-cli
   - antigravity-cli
@@ -70,9 +70,8 @@ aur_packages:
   - catppuccin-gtk-theme-mocha
   - oh-my-zsh-git
   - paru
-  - paru-bin-debug
-  - paru-debug
   - tor-browser-alpha-bin
+  - vesktop-bin
   - wireguard-go-git
   - zfs-linux
   - zfs-utils
