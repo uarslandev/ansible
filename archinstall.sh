@@ -204,9 +204,9 @@ useradd -m -G wheel -s /bin/bash "$USERNAME"
 echo "$USERNAME:$USER_PASS" | chpasswd
 echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-wheel && chmod 0440 /etc/sudoers.d/10-wheel
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-if [[ -d "$SCRIPT_DIR" && -f "$SCRIPT_DIR/site.yml" ]]; then
-    cp -a "$SCRIPT_DIR" "/home/$USERNAME/ansible"
+SCRIPT_DIR="\$( cd "\$( dirname "\${BASH_SOURCE[0]}" )" && pwd )"
+if [[ -d "\$SCRIPT_DIR" && -f "\$SCRIPT_DIR/site.yml" ]]; then
+    cp -a "\$SCRIPT_DIR" "/home/$USERNAME/ansible"
 else
     git clone https://github.com/uarslandev/ansible.git "/home/$USERNAME/ansible"
 fi
@@ -222,17 +222,17 @@ mkinitcpio -P
 
 # Bootloader Configuration
 if [[ "$BOOTLOADER_CHOICE" == "2" ]]; then
-    grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --removable
+    grub-install --target=x86_64-efi --efi-directory="$EFI_MOUNT_POINT" --bootloader-id=GRUB --removable
     [[ "$FS_CHOICE" == "1" ]] && sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw zfs_import_policy=force"/' /etc/default/grub
     [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
-    grub-mkconfig -o /boot/grub/grub.cfg
+    grub-mkconfig -o "$EFI_MOUNT_POINT/grub/grub.cfg"
 
 elif [[ "$BOOTLOADER_CHOICE" == "3" ]]; then
-    bootctl install --esp-path=/boot
-    echo -e "default arch.conf\ntimeout 5\nconsole-mode max" > /boot/loader/loader.conf
-    echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions \$CMDLINE_FINAL" > /boot/loader/entries/arch.conf
+    bootctl install --esp-path="$EFI_MOUNT_POINT"
+    echo -e "default arch.conf\ntimeout 5\nconsole-mode max" > "$EFI_MOUNT_POINT/loader/loader.conf"
+    echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions $CMDLINE_FINAL" > "$EFI_MOUNT_POINT/loader/entries/arch.conf"
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
-        echo -e "title Windows Boot Manager\nefi /EFI/Microsoft/Boot/bootmgfw.efi" > /boot/loader/entries/windows.conf
+        echo -e "title Windows Boot Manager\nefi /EFI/Microsoft/Boot/bootmgfw.efi" > "$EFI_MOUNT_POINT/loader/entries/windows.conf"
     fi
 
 elif [[ "$BOOTLOADER_CHOICE" == "1" ]]; then
@@ -267,13 +267,13 @@ if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
     arch-chroot /mnt /bin/bash -c "
         cd /home/$USERNAME/ansible
         PLAYBOOK='$CUSTOM_PLAYBOOK'
-        if [[ -z '\$PLAYBOOK' ]]; then
+        if [[ -z \"\$PLAYBOOK\" ]]; then
             for f in local.yml site.yml main.yml; do
-                [[ -f '\$f' ]] && { PLAYBOOK='\$f'; break; }
+                [[ -f \"\$f\" ]] && { PLAYBOOK=\"\$f\"; break; }
             done
         fi
-        if [[ -n '\$PLAYBOOK' ]]; then
-            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\"\"'\"
+        if [[ -n \"\$PLAYBOOK\" ]]; then
+            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
         else
             echo 'No valid playbook found. Skipping.'
         fi
