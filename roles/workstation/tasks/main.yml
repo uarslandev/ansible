@@ -43,81 +43,81 @@
     dest: /var/lib/ansible_managed_pacman_packages.json
     mode: '0644'
 
-- name: Copy paru setup script
-  ansible.builtin.copy:
-    src: install_paru.sh
-    dest: /tmp/install_paru.sh
-    mode: '0755'
+# - name: Copy paru setup script
+#   ansible.builtin.copy:
+#     src: install_paru.sh
+#     dest: /tmp/install_paru.sh
+#     mode: '0755'
 
-- name: Install paru using setup script
-  become: true
-  ansible.builtin.command:
-    cmd: /tmp/install_paru.sh
-  register: paru_install_result
-  args:
-    creates: /usr/bin/paru
-  failed_when: paru_install_result.rc != 0 and "target not found" not in (paru_install_result.stderr | lower)
+# # - name: Install paru using setup script
+# #   become: true
+# #   ansible.builtin.command:
+# #     cmd: /tmp/install_paru.sh
+# #   register: paru_install_result
+# #   args:
+# #     creates: /usr/bin/paru
+# #   failed_when: paru_install_result.rc != 0 and "target not found" not in (paru_install_result.stderr | lower)
 
-- name: Check whether paru binary is installed
-  ansible.builtin.stat:
-    path: /usr/bin/paru
-  register: paru_binary_stat
+# # - name: Check whether paru binary is installed
+# #   ansible.builtin.stat:
+# #     path: /usr/bin/paru
+# #   register: paru_binary_stat
 
-- name: Ensure target user has passwordless sudo for pacman (required for paru)
-  become: true
-  ansible.builtin.copy:
-    content: "{{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
-    dest: /etc/sudoers.d/99-ansible-aur-pacman
-    mode: '0440'
-    validate: 'visudo -cf %s'
+# # - name: Ensure target user has passwordless sudo for pacman (required for paru)
+# #   become: true
+# #   ansible.builtin.copy:
+# #     content: "{{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
+# #     dest: /etc/sudoers.d/99-ansible-aur-pacman
+# #     mode: '0440'
+# #     validate: 'visudo -cf %s'
 
 
-- name: Check for previously managed AUR package manifest
-  ansible.builtin.stat:
-    path: /var/lib/ansible_managed_aur_packages.json
-  register: aur_manifest_stat
+# # - name: Check for previously managed AUR package manifest
+# #   ansible.builtin.stat:
+# #     path: /var/lib/ansible_managed_aur_packages.json
+# #   register: aur_manifest_stat
 
-- name: Read previous AUR package manifest
-  ansible.builtin.slurp:
-    src: /var/lib/ansible_managed_aur_packages.json
-  register: previous_aur_manifest_raw
-  when: aur_manifest_stat.stat.exists
+# # - name: Read previous AUR package manifest
+# #   ansible.builtin.slurp:
+# #     src: /var/lib/ansible_managed_aur_packages.json
+# #   register: previous_aur_manifest_raw
+# #   when: aur_manifest_stat.stat.exists
 
-- name: Set previous AUR package list
-  ansible.builtin.set_fact:
-    previous_aur_packages: "{{ (previous_aur_manifest_raw.content | b64decode | from_json) if aur_manifest_stat.stat.exists else [] }}"
+# # - name: Set previous AUR package list
+# #   ansible.builtin.set_fact:
+# #     previous_aur_packages: "{{ (previous_aur_manifest_raw.content | b64decode | from_json) if aur_manifest_stat.stat.exists else [] }}"
 
-- name: Calculate AUR packages to auto-remove
-  ansible.builtin.set_fact:
-    aur_packages_to_remove: "{{ previous_aur_packages | difference(aur_packages | default([])) }}"
+# # - name: Calculate AUR packages to auto-remove
+# #   ansible.builtin.set_fact:
+# #     aur_packages_to_remove: "{{ previous_aur_packages | difference(aur_packages | default([])) }}"
 
-- name: Auto-remove AUR packages no longer listed in aur_packages
-  become: true
-  become_user: "{{ target_user }}"
-  ansible.builtin.command:
-    cmd: "paru -Rns --noconfirm {{ aur_packages_to_remove | join(' ') }}"
-  register: paru_remove_result
-  failed_when: paru_remove_result.rc != 0 and "target not found" not in (paru_remove_result.stderr | lower)
-  when:
-    - aur_packages_to_remove | length > 0
-    - paru_binary_stat.stat.exists
+# # - name: Auto-remove AUR packages no longer listed in aur_packages
+# #   become: true
+# #   become_user: "{{ target_user }}"
+# #   ansible.builtin.command:
+# #     cmd: "paru -Rns --noconfirm {{ aur_packages_to_remove | join(' ') }}"
+# #   register: paru_remove_result
+# #   failed_when: paru_remove_result.rc != 0 and "target not found" not in (paru_remove_result.stderr | lower)
+# #   when:
+# #     - aur_packages_to_remove | length > 0
+# #     - paru_binary_stat.stat.exists
 
-- name: Install AUR packages with paru when available
-  become: true
-  become_user: "{{ target_user }}"
-  ansible.builtin.command:
-    cmd: "paru -S --noconfirm --needed {{ aur_packages | join(' ') }}"
-  when:
-    - aur_packages | default([]) | length > 0
-    - paru_binary_stat.stat.exists
+# # - name: Install AUR packages with paru when available
+# #   become: true
+# #   become_user: "{{ target_user }}"
+# #   ansible.builtin.command:
+# #     cmd: "paru -S --noconfirm --needed {{ aur_packages | join(' ') }}"
+# #   when:
+# #     - aur_packages | default([]) | length > 0
+# #     - paru_binary_stat.stat.exists
 
-- name: Save updated AUR package manifest
-  become: true
-  ansible.builtin.copy:
-    content: "{{ aur_packages | default([]) | to_nice_json }}"
-    dest: /var/lib/ansible_managed_aur_packages.json
-    mode: '0644'
-  when: paru_binary_stat.stat.exists
+# # - name: Save updated AUR package manifest
+# #   become: true
+# #   ansible.builtin.copy:
+# #     content: "{{ aur_packages | default([]) | to_nice_json }}"
+# #     dest: /var/lib/ansible_managed_aur_packages.json
+# #     mode: '0644'
+# #   when: paru_binary_stat.stat.exists
 
 - name: Deploy pkg-sync utility script
   ansible.builtin.copy:
@@ -140,21 +140,3 @@
   when:
     - ansible_service_mgr == "systemd"
     - ly_service_unit.stat.exists
-
-# ==============================================================================
-# Oh-My-Zsh & Powerlevel10k Automation
-# ==============================================================================
-
-- name: Clone Oh-My-Zsh repository
-  ansible.builtin.git:
-    repo: 'https://github.com/ohmyzsh/ohmyzsh.git'
-    dest: "{{ user_home }}/.oh-my-zsh"
-    depth: 1
-    update: false
-
-- name: Clone Powerlevel10k theme for Oh-My-Zsh
-  ansible.builtin.git:
-    repo: 'https://github.com/romkatv/powerlevel10k.git'
-    dest: "{{ user_home }}/.oh-my-zsh/custom/themes/powerlevel10k"
-    depth: 1
-    update: false
