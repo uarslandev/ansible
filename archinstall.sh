@@ -79,9 +79,24 @@ swapoff -a || true
 lsblk -l -n -o NAME "$DISK" | tail -n +2 | xargs -I {} umount -l "/dev/{}" 2>/dev/null || true
 
 if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
-    sgdisk -n 0:0:+512M -t 0:ef00 -c 0:"Arch-EFI" "$DISK" || true
-    sgdisk -n 0:0:0     -t 0:8300 -c 0:"Arch-Root" "$DISK" || true
+    echo "Checking for failed/previous Arch Linux partitions..."
+    
+    # Locate partition numbers associated with Arch labels
+    ARCH_EFI_NUM=$(sgdisk -p "$DISK" 2>/dev/null | awk '/Arch-EFI/ {print $1}')
+    ARCH_ROOT_NUM=$(sgdisk -p "$DISK" 2>/dev/null | awk '/Arch-Root/ {print $1}')
+
+    if [[ -n "$ARCH_EFI_NUM" || -n "$ARCH_ROOT_NUM" ]]; then
+        echo "Found previous Arch installation attempt. Cleaning up failed partitions..."
+        [[ -n "$ARCH_EFI_NUM" ]] && sgdisk -d "$ARCH_EFI_NUM" "$DISK"
+        [[ -n "$ARCH_ROOT_NUM" ]] && sgdisk -d "$ARCH_ROOT_NUM" "$DISK"
+        partprobe "$DISK"; sleep 2
+    fi
+
+    echo "Creating new Arch Linux partitions in free space..."
+    sgdisk -n 0:0:+512M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
+    sgdisk -n 0:0:0     -t 0:8300 -c 0:"Arch-Root" "$DISK"
 else
+    # Full disk wipe for non-dual boot installations
     blkdiscard -f "$DISK" 2>/dev/null || true
     zpool labelclear -f "$DISK" 2>/dev/null || true
     wipefs --all --force "$DISK" && sgdisk --zap-all "$DISK"
@@ -91,11 +106,19 @@ else
 fi
 partprobe "$DISK"; sleep 2
 
-P_SEP=$([[ "$DISK" =~ (nvme|mmcblk) ]] && echo "p" || echo "")
-EFI_PART="${DISK}${P_SEP}1"
-ROOT_PART="${DISK}${P_SEP}2"
+# Dynamically identify created partitions by label or structure
+if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
+    EFI_DEV_NAME=$(lsblk -l -n -o NAME,LABEL "$DISK" | awk '/Arch-EFI/ {print $1}')
+    ROOT_DEV_NAME=$(lsblk -l -n -o NAME,LABEL "$DISK" | awk '/Arch-Root/ {print $1}')
+    EFI_PART="/dev/$EFI_DEV_NAME"
+    ROOT_PART="/dev/$ROOT_DEV_NAME"
+else
+    P_SEP=$([[ "$DISK" =~ (nvme|mmcblk) ]] && echo "p" || echo "")
+    EFI_PART="${DISK}${P_SEP}1"
+    ROOT_PART="${DISK}${P_SEP}2"
+fi
 
-echo "[2/7] Formatting EFI partition..."
+echo "[2/7] Formatting EFI partition ($EFI_PART)..."
 mkfs.vfat -F32 "$EFI_PART"
 
 # --- 3. Filesystem Setup ---
@@ -278,7 +301,7 @@ if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
             done
         fi
         if [[ -n \"\$PLAYBOOK\" ]]; then
-            su - $USERNAME -c \"cd ~/ansible && HOME=/home/$USERNAME ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
+            su -i -u $USERNAME sh -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
         else
             echo 'No valid playbook found. Skipping.'
         fi
@@ -287,12 +310,12 @@ fi
 
 # --- 7. Clean Up ---
 echo "[7/7] Unmounting partitions..."
-umount "/mnt$EFI_MOUNT_POINT"
+umount "/mnt$EFI_MOUNT_POINT" 2>/dev/null || true
 if [[ "$FS_CHOICE" == "1" ]]; then
-    zfs unmount -a
-    zpool export "$POOL_NAME"
+    zfs unmount -a 2>/dev/null || true
+    zpool export "$POOL_NAME" 2>/dev/null || true
 else
-    umount -R /mnt
+    umount -R /mnt 2>/dev/null || true
 fi
 
 echo "=================================================="
