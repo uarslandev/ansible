@@ -93,15 +93,15 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     fi
 
     echo "Creating new Arch Linux partitions in free space..."
-    sgdisk -n 0:0:+512M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
+    sgdisk -n 0:0:+1024M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
     sgdisk -n 0:0:0     -t 0:8300 -c 0:"Arch-Root" "$DISK"
 else
-    # Full disk wipe for non-dual boot installations
+    # Full disk wipe for single-OS Arch installations
     blkdiscard -f "$DISK" 2>/dev/null || true
     zpool labelclear -f "$DISK" 2>/dev/null || true
     wipefs --all --force "$DISK" && sgdisk --zap-all "$DISK"
     PART_TYPE=$([[ "$FS_CHOICE" == "1" ]] && echo "bf00" || echo "8300")
-    sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI-system" "$DISK"
+    sgdisk -n 1:0:+1024M -t 1:ef00 -c 1:"EFI-system" "$DISK"
     sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
 fi
 partprobe "$DISK"; sleep 2
