@@ -93,9 +93,16 @@ def save_config(config_path, data):
         f.write(content)
 
 
+def get_working_pkg_cmd():
+    if subprocess.run(["which", "paru"], capture_output=True).returncode == 0:
+        if subprocess.run(["paru", "--version"], capture_output=True, text=True).returncode == 0:
+            return "paru"
+    return "pacman"
+
+
 def get_installed_packages():
     # Helper to execute paru or pacman
-    cmd_bin = "paru" if subprocess.run(["which", "paru"], capture_output=True).returncode == 0 else "pacman"
+    cmd_bin = get_working_pkg_cmd()
 
     try:
         native = set(subprocess.check_output([cmd_bin, "-Qnq"], text=True).splitlines())
@@ -111,7 +118,7 @@ def get_installed_packages():
 
 
 def is_aur_package(pkg):
-    cmd_bin = "paru" if subprocess.run(["which", "paru"], capture_output=True).returncode == 0 else "pacman"
+    cmd_bin = get_working_pkg_cmd()
     try:
         res = subprocess.run([cmd_bin, "-Qm", pkg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return res.returncode == 0

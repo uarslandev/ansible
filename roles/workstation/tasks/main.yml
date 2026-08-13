@@ -1,9 +1,7 @@
----
 # ==============================================================================
 # Automatic package pruning (auto-uninstall when removed from system_packages)
 # ==============================================================================
 
-# 1. Read previously managed package manifest if it exists
 - name: Check for previously managed pacman package manifest
   ansible.builtin.stat:
     path: /var/lib/ansible_managed_pacman_packages.json
@@ -43,81 +41,136 @@
     dest: /var/lib/ansible_managed_pacman_packages.json
     mode: '0644'
 
-# - name: Copy paru setup script
-#   ansible.builtin.copy:
-#     src: install_paru.sh
-#     dest: /tmp/install_paru.sh
-#     mode: '0755'
+- name: Ensure target user has passwordless sudo for pacman (required for paru)
+  become: true
+  ansible.builtin.copy:
+    content: "{{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
+    dest: /etc/sudoers.d/99-ansible-aur-pacman
+    mode: '0440'
+    validate: 'visudo -cf %s'
 
-# # - name: Install paru using setup script
-# #   become: true
-# #   ansible.builtin.command:
-# #     cmd: /tmp/install_paru.sh
-# #   register: paru_install_result
-# #   args:
-# #     creates: /usr/bin/paru
-# #   failed_when: paru_install_result.rc != 0 and "target not found" not in (paru_install_result.stderr | lower)
+- name: Ensure base-devel and git are installed (required for building AUR packages)
+  become: true
+  ansible.builtin.pacman:
+    name:
+      - base-devel
+      - git
+    state: present
 
-# # - name: Check whether paru binary is installed
-# #   ansible.builtin.stat:
-# #     path: /usr/bin/paru
-# #   register: paru_binary_stat
+- name: Check whether paru binary is functional
+  ansible.builtin.command:
+    cmd: paru --version
+  register: paru_check
+  failed_when: false
+  changed_when: false
 
-# # - name: Ensure target user has passwordless sudo for pacman (required for paru)
-# #   become: true
-# #   ansible.builtin.copy:
-# #     content: "{{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
-# #     dest: /etc/sudoers.d/99-ansible-aur-pacman
-# #     mode: '0440'
-# #     validate: 'visudo -cf %s'
+# ==============================================================================
+# Refactored Native Ansible Paru Compilation & Installation
+# ==============================================================================
 
+- name: Create temporary build directory for paru
+  ansible.builtin.file:
+    path: /tmp/paru-build
+    state: directory
+    owner: "{{ target_user }}"
+    mode: '0755'
+  when: paru_check.rc != 0
 
-# # - name: Check for previously managed AUR package manifest
-# #   ansible.builtin.stat:
-# #     path: /var/lib/ansible_managed_aur_packages.json
-# #   register: aur_manifest_stat
+- name: Clone paru repository from AUR
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.git:
+    repo: https://aur.archlinux.org/paru.git
+    dest: /tmp/paru-build
+    update: true
+  when: paru_check.rc != 0
 
-# # - name: Read previous AUR package manifest
-# #   ansible.builtin.slurp:
-# #     src: /var/lib/ansible_managed_aur_packages.json
-# #   register: previous_aur_manifest_raw
-# #   when: aur_manifest_stat.stat.exists
+- name: Clean previous build artifacts to force a fresh build
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: rm -rf /tmp/paru-build/*.pkg.tar* /tmp/paru-build/pkg /tmp/paru-build/src/paru-*
+    chdir: /tmp/paru-build
+  when: paru_check.rc != 0
+  failed_when: false
 
-# # - name: Set previous AUR package list
-# #   ansible.builtin.set_fact:
-# #     previous_aur_packages: "{{ (previous_aur_manifest_raw.content | b64decode | from_json) if aur_manifest_stat.stat.exists else [] }}"
+- name: Build paru package only (without installing via makepkg)
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: makepkg -sf --noconfirm --skippgpcheck
+    chdir: /tmp/paru-build
+  when: paru_check.rc != 0
 
-# # - name: Calculate AUR packages to auto-remove
-# #   ansible.builtin.set_fact:
-# #     aur_packages_to_remove: "{{ previous_aur_packages | difference(aur_packages | default([])) }}"
+- name: Force install the built paru packages using pacman directly
+  become: true
+  ansible.builtin.shell: |
+    pacman -U --noconfirm --overwrite '*' /tmp/paru-build/*.pkg.tar.zst
+  when: paru_check.rc != 0
 
-# # - name: Auto-remove AUR packages no longer listed in aur_packages
-# #   become: true
-# #   become_user: "{{ target_user }}"
-# #   ansible.builtin.command:
-# #     cmd: "paru -Rns --noconfirm {{ aur_packages_to_remove | join(' ') }}"
-# #   register: paru_remove_result
-# #   failed_when: paru_remove_result.rc != 0 and "target not found" not in (paru_remove_result.stderr | lower)
-# #   when:
-# #     - aur_packages_to_remove | length > 0
-# #     - paru_binary_stat.stat.exists
+- name: Clean up temporary paru build directory
+  ansible.builtin.file:
+    path: /tmp/paru-build
+    state: absent
+  when: paru_check.rc != 0
 
-# # - name: Install AUR packages with paru when available
-# #   become: true
-# #   become_user: "{{ target_user }}"
-# #   ansible.builtin.command:
-# #     cmd: "paru -S --noconfirm --needed {{ aur_packages | join(' ') }}"
-# #   when:
-# #     - aur_packages | default([]) | length > 0
-# #     - paru_binary_stat.stat.exists
+# ==============================================================================
+# AUR Package Management & Manifest Handling
+# ==============================================================================
 
-# # - name: Save updated AUR package manifest
-# #   become: true
-# #   ansible.builtin.copy:
-# #     content: "{{ aur_packages | default([]) | to_nice_json }}"
-# #     dest: /var/lib/ansible_managed_aur_packages.json
-# #     mode: '0644'
-# #   when: paru_binary_stat.stat.exists
+- name: Verify paru binary is functional after install
+  ansible.builtin.command:
+    cmd: paru --version
+  register: paru_binary_stat
+  failed_when: false
+  changed_when: false
+
+- name: Check for previously managed AUR package manifest
+  ansible.builtin.stat:
+    path: /var/lib/ansible_managed_aur_packages.json
+  register: aur_manifest_stat
+
+- name: Read previous AUR package manifest
+  ansible.builtin.slurp:
+    src: /var/lib/ansible_managed_aur_packages.json
+  register: previous_aur_manifest_raw
+  when: aur_manifest_stat.stat.exists
+
+- name: Set previous AUR package list
+  ansible.builtin.set_fact:
+    previous_aur_packages: "{{ (previous_aur_manifest_raw.content | b64decode | from_json) if aur_manifest_stat.stat.exists else [] }}"
+
+- name: Calculate AUR packages to auto-remove
+  ansible.builtin.set_fact:
+    aur_packages_to_remove: "{{ previous_aur_packages | difference(aur_packages | default([])) }}"
+
+- name: Auto-remove AUR packages no longer listed in aur_packages
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: "paru -Rns --noconfirm {{ aur_packages_to_remove | join(' ') }}"
+  register: paru_remove_result
+  failed_when: paru_remove_result.rc != 0 and "target not found" not in (paru_remove_result.stderr | lower)
+  when:
+    - aur_packages_to_remove | length > 0
+    - paru_binary_stat.rc == 0
+
+- name: Install AUR packages with paru when available
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: "paru -S --noconfirm --needed {{ aur_packages | join(' ') }}"
+  when:
+    - aur_packages | default([]) | length > 0
+    - paru_binary_stat.rc == 0
+
+- name: Save updated AUR package manifest
+  become: true
+  ansible.builtin.copy:
+    content: "{{ aur_packages | default([]) | to_nice_json }}"
+    dest: /var/lib/ansible_managed_aur_packages.json
+    mode: '0644'
+  when: paru_binary_stat.rc == 0
 
 - name: Deploy pkg-sync utility script
   ansible.builtin.copy:
@@ -125,18 +178,35 @@
     dest: "{{ user_bin }}/pkg-sync"
     mode: '0755'
 
-
-- name: Check if ly templated systemd unit file exists
-  ansible.builtin.stat:
-    path: /usr/lib/systemd/system/ly@.service
-  register: ly_service_unit
-
-- name: Enable and start ly on tty1
+- name: Disable conflicting display managers
   become: true
   ansible.builtin.systemd_service:
-    name: ly@tty1.service
-    enabled: true
-    state: started
+    name: "{{ item }}"
+    enabled: false
+  loop:
+    - sddm.service
+    - gdm.service
+    - lightdm.service
+  failed_when: false
   when:
     - ansible_service_mgr == "systemd"
-    - ly_service_unit.stat.exists
+
+- name: Check for ly systemd service file
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system/ly.service
+  register: ly_unit_stat
+
+- name: Check for ly templated systemd service file
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system/ly@.service
+  register: ly_templated_unit_stat
+
+- name: Enable ly display manager service
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ 'ly.service' if ly_unit_stat.stat.exists else 'ly@tty1.service' }}"
+    enabled: true
+    state: "{{ 'started' if (ansible_facts['is_chroot'] is not defined or not ansible_facts['is_chroot']) else omit }}"
+  when:
+    - ansible_service_mgr == "systemd"
+    - ly_unit_stat.stat.exists or ly_templated_unit_stat.stat.exists

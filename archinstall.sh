@@ -202,9 +202,14 @@ HOSTS
 echo "root:$ROOT_PASS" | chpasswd
 useradd -m -G wheel -s /bin/bash "$USERNAME"
 echo "$USERNAME:$USER_PASS" | chpasswd
-echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel && chmod 0440 /etc/sudoers.d/10-wheel
+echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-wheel && chmod 0440 /etc/sudoers.d/10-wheel
 
-git clone https://github.com/uarslandev/ansible.git "/home/$USERNAME/ansible"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [[ -d "$SCRIPT_DIR" && -f "$SCRIPT_DIR/site.yml" ]]; then
+    cp -a "$SCRIPT_DIR" "/home/$USERNAME/ansible"
+else
+    git clone https://github.com/uarslandev/ansible.git "/home/$USERNAME/ansible"
+fi
 chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/ansible"
 
 systemctl enable NetworkManager
@@ -268,7 +273,7 @@ if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
             done
         fi
         if [[ -n '\$PLAYBOOK' ]]; then
-            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local\"
+            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\"\"'\"
         else
             echo 'No valid playbook found. Skipping.'
         fi

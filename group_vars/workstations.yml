@@ -2,7 +2,10 @@
 # Packages installed via pacman on Arch Linux workstations
 system_packages:
   - amd-ucode
+  - ansible
   - ark
+  - base
+  - base-devel
   - bluedevil
   - broadcom-wl-dkms
   - btop
@@ -10,11 +13,13 @@ system_packages:
   - curl
   - dkms
   - dolphin
+  - efibootmgr
   - fastfetch
   - fd
   - fzf
   - gcc
   - git
+  - github-cli
   - gwenview
   - htop
   - intel-ucode
@@ -22,16 +27,16 @@ system_packages:
   - jq
   - kate
   - kde-cli-tools
+  - kdeconnect
   - konsole
   - kscreen
+  - librewolf
   - linux
   - linux-firmware
   - linux-headers
-  - linux-lts
-  - linux-lts-headers
-  - linux-zen
-  - linux-zen-headers
+  - ly
   - make
+  - nano
   - neovim
   - networkmanager
   - nodejs
@@ -47,28 +52,32 @@ system_packages:
   - sddm-kcm
   - sof-firmware
   - spectacle
-  - tar
+  - sudo
   - tmux
   - torbrowser-launcher
   - unzip
-  - util-linux
   - wget
   - wireless-regdb
-  - wpa_supplicant
+  - wl-clipboard
   - xdg-desktop-portal-kde
-  - zfs-utils
   - zsh
 
-# AUR packages installed via paru (when available)
+# AUR packages installed via paru/yay
 aur_packages:
   - ani-cli
   - antigravity-cli
   - catppuccin-cursors-mocha
   - catppuccin-gtk-theme-mocha
+  - oh-my-zsh-git
   - paru
+  - paru-bin-debug
+  - paru-debug
   - tor-browser-alpha-bin
   - wireguard-go-git
+  - zfs-linux
+  - zfs-utils
   - zsh-autosuggestions-git
+  - zsh-theme-powerlevel10k-git
 
 # Versions for standalone DevOps tools
 devops_tool_versions:

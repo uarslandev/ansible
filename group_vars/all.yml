@@ -1,6 +1,6 @@
 ---
 # Shared variables across all hosts (Workstations and Servers)
-target_user: "{{ ansible_facts['env']['USER'] | default(ansible_facts['user_id'] | default('user')) }}"
+target_user: "{{ ansible_user_id if (ansible_user_id is defined and ansible_user_id != 'root') else (ansible_env.SUDO_USER | default(ansible_env.LOGNAME | default('user'))) }}"
 user_home: "/home/{{ target_user }}"
 user_bin: "{{ user_home }}/.local/bin"
 
