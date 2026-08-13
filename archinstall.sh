@@ -44,10 +44,9 @@ fi
 
 read -rp "Are you dual-booting with Windows? (y/N): " DUAL_BOOT; DUAL_BOOT=${DUAL_BOOT,,}
 
-ENABLE_ENC="n"; ZFS_PASS=""
+ENABLE_ENC="n"
 if [[ "$FS_CHOICE" == "1" ]]; then
-    read -rp "Enable Native ZFS Encryption? (y/N): " ENABLE_ENC; ENABLE_ENC=${ENABLE_ENC,,}
-    [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && prompt_pass "ZFS Encryption Passphrase" ZFS_PASS ZFS_PASS_CONFIRM
+    read -rp "Enable Native ZFS Encryption (using keyfile)? (y/N): " ENABLE_ENC; ENABLE_ENC=${ENABLE_ENC,,}
 fi
 
 echo -e "\nRun Ansible after installation? (y/N): "
@@ -57,11 +56,12 @@ CUSTOM_PLAYBOOK=""
 
 POOL_NAME="zroot"
 CMDLINE=$([[ "$FS_CHOICE" == "1" ]] && echo "zfs=$POOL_NAME/ROOT/default rw" || echo "rw")
+EFI_MOUNT_POINT=$([[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]] && echo "/efi" || echo "/boot")
 
 echo -e "\n=================================================="
 echo "WARNING: Target Partitions on $DISK will be configured!"
 echo "Filesystem: $(case $FS_CHOICE in 1) echo ZFS;; 2) echo ext4;; 3) echo btrfs;; esac)"
-echo "Encryption: $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED' || echo 'DISABLED')"
+echo "Encryption: $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (Keyfile)' || echo 'DISABLED')"
 echo "Username:   $USERNAME | Timezone: $TIMEZONE"
 echo "Bootloader: $(case $BOOTLOADER_CHOICE in 1) echo ZFSBootMenu;; 2) echo GRUB;; 3) echo systemd-boot;; esac)"
 echo "Dual-Boot:  $([[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo 'YES' || echo 'NO')"
@@ -98,13 +98,22 @@ mkfs.vfat -F32 "$EFI_PART"
 # --- 3. Filesystem Setup ---
 echo "[3/7] Setting up root filesystem..."
 case "$FS_CHOICE" in
-    1) # ZFS Setup
+    1) # ZFS Setup with Keyfile
         zgenhostid -f 0x00babaf1
         POOL_OPTS=(-o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt)
-        
+        KEYFILE_TMP="/tmp/zfs.key"
+
         if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-            echo "$ZFS_PASS" | zpool create "${POOL_OPTS[@]}" -O encryption=aes-256-gcm -O keyformat=passphrase -O keylocation=file:///dev/stdin "$POOL_NAME" "$ROOT_PART"
-            zfs set keylocation=prompt "$POOL_NAME"
+            # Generate 32-byte (256-bit) raw key file
+            dd if=/dev/urandom of="$KEYFILE_TMP" bs=32 count=1 status=none
+            chmod 600 "$KEYFILE_TMP"
+
+            # Create pool encrypted via keyfile
+            zpool create "${POOL_OPTS[@]}" \
+                -O encryption=aes-256-gcm \
+                -O keyformat=raw \
+                -O keylocation="file://$KEYFILE_TMP" \
+                "$POOL_NAME" "$ROOT_PART"
         else
             zpool create "${POOL_OPTS[@]}" "$POOL_NAME" "$ROOT_PART"
         fi
@@ -116,17 +125,36 @@ case "$FS_CHOICE" in
         
         zpool export "$POOL_NAME"
         zpool import -N -R /mnt "$POOL_NAME"
+
         if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-            # Non-interactive key load using stream input (prevents double prompt during setup)
-            echo "$ZFS_PASS" | zfs load-key "$POOL_NAME"
+            zfs load-key -L "file://$KEYFILE_TMP" "$POOL_NAME"
         fi
+
         zfs mount "$POOL_NAME/ROOT/default"
         zfs mount "$POOL_NAME/home"
+
+        # Mount EFI partition and place keyfile into unencrypted ESP
+        mkdir -p "/mnt$EFI_MOUNT_POINT"
+        mount "$EFI_PART" "/mnt$EFI_MOUNT_POINT"
+
+        if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
+            mkdir -p "/mnt$EFI_MOUNT_POINT/zfs"
+            cp "$KEYFILE_TMP" "/mnt$EFI_MOUNT_POINT/zfs/zfs.key"
+            chmod 600 "/mnt$EFI_MOUNT_POINT/zfs/zfs.key"
+            rm -f "$KEYFILE_TMP"
+
+            # Re-point keylocation to the permanent keyfile path inside the system
+            zfs set keylocation="file://$EFI_MOUNT_POINT/zfs/zfs.key" "$POOL_NAME"
+        fi
         ;;
+
     2) # ext4 Setup
         mkfs.ext4 -F "$ROOT_PART"
         mount "$ROOT_PART" /mnt
+        mkdir -p "/mnt$EFI_MOUNT_POINT"
+        mount "$EFI_PART" "/mnt$EFI_MOUNT_POINT"
         ;;
+
     3) # btrfs Setup
         mkfs.btrfs -f "$ROOT_PART"
         mount "$ROOT_PART" /mnt
@@ -136,12 +164,10 @@ case "$FS_CHOICE" in
         mount -o compress=zstd,subvol=@ "$ROOT_PART" /mnt
         mkdir -p /mnt/home
         mount -o compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
+        mkdir -p "/mnt$EFI_MOUNT_POINT"
+        mount "$EFI_PART" "/mnt$EFI_MOUNT_POINT"
         ;;
 esac
-
-EFI_MOUNT_POINT=$([[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]] && echo "/efi" || echo "/boot")
-mkdir -p "/mnt$EFI_MOUNT_POINT"
-mount "$EFI_PART" "/mnt$EFI_MOUNT_POINT"
 
 # --- 4. Base System Installation ---
 echo "[4/7] Installing base system..."
@@ -224,8 +250,7 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
     
     if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-        # Cache key from ZFSBootMenu to initramfs (Fixes double passphrase prompt on boot)
-        zpool set org.zfsbootmenu:keysource="$POOL_NAME/ROOT/default" "$POOL_NAME"
+        zfs set org.zfsbootmenu:keysource="$POOL_NAME" "$POOL_NAME"
     fi
     zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
 fi
