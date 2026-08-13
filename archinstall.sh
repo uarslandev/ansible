@@ -58,7 +58,7 @@ CUSTOM_PLAYBOOK=""
 POOL_NAME="zroot"
 EFI_MOUNT_POINT=$([[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]] && echo "/efi" || echo "/boot")
 
-# Define boot parameters outside heredocs to prevent variable unbound errors under set -u
+# Define boot parameters before entering the heredoc block
 CMDLINE_FINAL=$([[ "$FS_CHOICE" == "1" ]] && echo "zfs=$POOL_NAME/ROOT/default rw zfs_import_policy=force" || echo "rw")
 
 echo -e "\n=================================================="
@@ -225,7 +225,7 @@ if [[ "$BOOTLOADER_CHOICE" == "2" ]]; then
 elif [[ "$BOOTLOADER_CHOICE" == "3" ]]; then
     bootctl install --esp-path=/boot
     echo -e "default arch.conf\ntimeout 5\nconsole-mode max" > /boot/loader/loader.conf
-    echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions $CMDLINE_FINAL" > /boot/loader/entries/arch.conf
+    echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions \$CMDLINE_FINAL" > /boot/loader/entries/arch.conf
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
         echo -e "title Windows Boot Manager\nefi /EFI/Microsoft/Boot/bootmgfw.efi" > /boot/loader/entries/windows.conf
     fi
