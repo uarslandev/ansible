@@ -214,7 +214,7 @@ echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-wheel && chmod 044
 if [[ ! -f "/home/$USERNAME/ansible/site.yml" ]]; then
     git clone https://github.com/uarslandev/ansible.git "/home/$USERNAME/ansible"
 fi
-chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/ansible"
+chown -R "$USERNAME:$USERNAME" "/home/$USERNAME"
 
 systemctl enable NetworkManager
 
@@ -269,6 +269,7 @@ fi
 if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
     echo "Running Ansible playbook..."
     arch-chroot /mnt /bin/bash -c "
+        chown -R $USERNAME:$USERNAME /home/$USERNAME
         cd /home/$USERNAME/ansible
         PLAYBOOK='$CUSTOM_PLAYBOOK'
         if [[ -z \"\$PLAYBOOK\" ]]; then
@@ -277,7 +278,7 @@ if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
             done
         fi
         if [[ -n \"\$PLAYBOOK\" ]]; then
-            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
+            su - $USERNAME -c \"cd ~/ansible && HOME=/home/$USERNAME ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
         else
             echo 'No valid playbook found. Skipping.'
         fi
