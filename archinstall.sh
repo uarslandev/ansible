@@ -56,7 +56,6 @@ CUSTOM_PLAYBOOK=""
 [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]] && read -rp "Enter custom playbook filename (leave empty for auto-detect): " CUSTOM_PLAYBOOK
 
 POOL_NAME="zroot"
-CMDLINE=$([[ "$FS_CHOICE" == "1" ]] && echo "zfs=$POOL_NAME/ROOT/default rw" || echo "rw")
 EFI_MOUNT_POINT=$([[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]] && echo "/efi" || echo "/boot")
 
 echo -e "\n=================================================="
@@ -100,8 +99,21 @@ mkfs.vfat -F32 "$EFI_PART"
 echo "[3/7] Setting up root filesystem..."
 case "$FS_CHOICE" in
     1) # ZFS Setup with Passphrase Prompt
+        # Enforce explicit matching hostid
         zgenhostid -f 0x00babaf1
-        POOL_OPTS=(-o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt)
+        
+        POOL_OPTS=(
+            -o ashift=12 
+            -o autotrim=on 
+            -O acltype=posixacl 
+            -O xattr=sa 
+            -O dnodesize=auto 
+            -O normalization=formD 
+            -O relatime=on 
+            -O canmount=off 
+            -O mountpoint=none 
+            -R /mnt
+        )
 
         if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
             echo "$ZFS_PASS" | zpool create "${POOL_OPTS[@]}" \
@@ -162,7 +174,11 @@ PKGS=(base linux linux-firmware sudo nano networkmanager efibootmgr git ansible 
 
 pacstrap -K /mnt "${PKGS[@]}"
 genfstab -U /mnt >> /mnt/etc/fstab
-[[ "$FS_CHOICE" == "1" ]] && cp /etc/hostid /mnt/etc/hostid
+
+# Direct hostid sync inside target root filesystem
+if [[ "$FS_CHOICE" == "1" ]]; then
+    zgenhostid -f -o /mnt/etc/hostid 0x00babaf1
+fi
 
 # --- 5. System Chroot Configuration ---
 echo "[5/7] Configuring installed system..."
@@ -201,14 +217,15 @@ mkinitcpio -P
 # Bootloader Configuration
 if [[ "$BOOTLOADER_CHOICE" == "2" ]]; then
     grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --removable
-    [[ "$FS_CHOICE" == "1" ]] && sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw"/' /etc/default/grub
+    [[ "$FS_CHOICE" == "1" ]] && sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="zfs=$POOL_NAME\/ROOT\/default rw zfs_import_policy=force"/' /etc/default/grub
     [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
     grub-mkconfig -o /boot/grub/grub.cfg
 
 elif [[ "$BOOTLOADER_CHOICE" == "3" ]]; then
     bootctl install --esp-path=/boot
+    CMDLINE_FINAL=$([[ "$FS_CHOICE" == "1" ]] && echo "zfs=$POOL_NAME/ROOT/default rw zfs_import_policy=force" || echo "rw")
     echo -e "default arch.conf\ntimeout 5\nconsole-mode max" > /boot/loader/loader.conf
-    echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions $CMDLINE" > /boot/loader/entries/arch.conf
+    echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions $CMDLINE_FINAL" > /boot/loader/entries/arch.conf
     if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
         echo -e "title Windows Boot Manager\nefi /EFI/Microsoft/Boot/bootmgfw.efi" > /boot/loader/entries/windows.conf
     fi
@@ -234,10 +251,12 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
     
     if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-        # Hand off decrypted key from ZFSBootMenu to initramfs (prevents double prompt)
+        # Key handoff from ZFSBootMenu -> initramfs (single prompt at boot)
         zpool set org.zfsbootmenu:keysource="$POOL_NAME" "$POOL_NAME"
     fi
-    zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
+
+    # Pass import force flag directly through ZFSBootMenu kernel command line
+    zfs set org.zfsbootmenu:commandline="rw zfs_import_policy=force" "$POOL_NAME/ROOT"
 fi
 
 if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
