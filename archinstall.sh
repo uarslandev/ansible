@@ -181,6 +181,13 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     zgenhostid -f -o /mnt/etc/hostid 0x00babaf1
 fi
 
+# Prepare Ansible directory from host if local site.yml exists
+HOST_SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]:-$0}" )" && pwd )"
+mkdir -p "/mnt/home/$USERNAME/ansible"
+if [[ -f "$HOST_SCRIPT_DIR/site.yml" ]]; then
+    cp -a "$HOST_SCRIPT_DIR/." "/mnt/home/$USERNAME/ansible/"
+fi
+
 # --- 5. System Chroot Configuration ---
 echo "[5/7] Configuring installed system..."
 arch-chroot /mnt /bin/bash <<CHROOT
@@ -204,10 +211,7 @@ useradd -m -G wheel -s /bin/bash "$USERNAME"
 echo "$USERNAME:$USER_PASS" | chpasswd
 echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-wheel && chmod 0440 /etc/sudoers.d/10-wheel
 
-SCRIPT_DIR="\$( cd "\$( dirname "\${BASH_SOURCE[0]}" )" && pwd )"
-if [[ -d "\$SCRIPT_DIR" && -f "\$SCRIPT_DIR/site.yml" ]]; then
-    cp -a "\$SCRIPT_DIR" "/home/$USERNAME/ansible"
-else
+if [[ ! -f "/home/$USERNAME/ansible/site.yml" ]]; then
     git clone https://github.com/uarslandev/ansible.git "/home/$USERNAME/ansible"
 fi
 chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/ansible"
