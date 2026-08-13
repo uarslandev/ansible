@@ -56,7 +56,6 @@ system_packages:
   - wireless-regdb
   - wpa_supplicant
   - xdg-desktop-portal-kde
-  - zfs-dkms
   - zfs-utils
   - zsh
 
