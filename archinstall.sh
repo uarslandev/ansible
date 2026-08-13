@@ -98,7 +98,7 @@ mkfs.vfat -F32 "$EFI_PART"
 # --- 3. Filesystem Setup ---
 echo "[3/7] Setting up root filesystem..."
 case "$FS_CHOICE" in
-    1) # ZFS
+    1) # ZFS Setup
         zgenhostid -f 0x00babaf1
         POOL_OPTS=(-o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt)
         
@@ -117,16 +117,17 @@ case "$FS_CHOICE" in
         zpool export "$POOL_NAME"
         zpool import -N -R /mnt "$POOL_NAME"
         if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
-            echo "$ZFS_PASS" | zfs load-key -L prompt "$POOL_NAME"
+            # Non-interactive key load using stream input (prevents double prompt during setup)
+            echo "$ZFS_PASS" | zfs load-key "$POOL_NAME"
         fi
         zfs mount "$POOL_NAME/ROOT/default"
         zfs mount "$POOL_NAME/home"
         ;;
-    2) # ext4
+    2) # ext4 Setup
         mkfs.ext4 -F "$ROOT_PART"
         mount "$ROOT_PART" /mnt
         ;;
-    3) # btrfs
+    3) # btrfs Setup
         mkfs.btrfs -f "$ROOT_PART"
         mount "$ROOT_PART" /mnt
         btrfs subvolume create /mnt/@
@@ -221,7 +222,11 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     echo "[6/7] Setting ZFS pool boot properties..."
     zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
     zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
-    zpool set org.zfsbootmenu:keysource="$POOL_NAME/ROOT" "$POOL_NAME"
+    
+    if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
+        # Cache key from ZFSBootMenu to initramfs (Fixes double passphrase prompt on boot)
+        zpool set org.zfsbootmenu:keysource="$POOL_NAME/ROOT/default" "$POOL_NAME"
+    fi
     zfs set org.zfsbootmenu:commandline="rw" "$POOL_NAME/ROOT"
 fi
 
