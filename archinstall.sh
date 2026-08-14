@@ -89,7 +89,7 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
         echo "Found previous Arch installation attempt. Cleaning up failed partitions..."
         [[ -n "$ARCH_EFI_NUM" ]] && sgdisk -d "$ARCH_EFI_NUM" "$DISK"
         [[ -n "$ARCH_ROOT_NUM" ]] && sgdisk -d "$ARCH_ROOT_NUM" "$DISK"
-        partprobe "$DISK"; sleep 2
+        partprobe "$DISK"; udevadm settle; sleep 2
     fi
 
     echo "Creating new Arch Linux partitions in free space..."
@@ -104,7 +104,7 @@ else
     sgdisk -n 1:0:+1024M -t 1:ef00 -c 1:"EFI-system" "$DISK"
     sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
 fi
-partprobe "$DISK"; sleep 2
+partprobe "$DISK"; udevadm settle; sleep 2
 
 # Dynamically identify created partitions by label or structure
 if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
@@ -301,7 +301,7 @@ if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
             done
         fi
         if [[ -n \"\$PLAYBOOK\" ]]; then
-            su -i -u $USERNAME sh -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
+            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
         else
             echo 'No valid playbook found. Skipping.'
         fi
