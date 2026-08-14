@@ -28,6 +28,7 @@ system_packages:
   - kate
   - kde-cli-tools
   - kdeconnect
+  - keepassxc
   - konsole
   - kscreen
   - librewolf
@@ -39,6 +40,7 @@ system_packages:
   - nano
   - neovim
   - networkmanager
+  - nextcloud-client
   - nodejs
   - npm
   - plasma-meta
@@ -60,9 +62,10 @@ system_packages:
   - wireless-regdb
   - wl-clipboard
   - xdg-desktop-portal-kde
+  - yakuake
   - zsh
 
-# AUR packages installed via paru (when available)
+# AUR packages installed via paru/yay
 aur_packages:
   - ani-cli
   - antigravity-cli
@@ -70,6 +73,7 @@ aur_packages:
   - catppuccin-gtk-theme-mocha
   - oh-my-zsh-git
   - paru
+  - paru-debug
   - tor-browser-alpha-bin
   - vesktop-bin
   - wireguard-go-git
