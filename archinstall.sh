@@ -97,11 +97,16 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     fi
 
     echo "Finding largest unallocated space region..."
-    # Find start sector of the largest contiguous free space block
-    LARGEST_START=$(sgdisk -L "$DISK" | awk '/^  *[0-9]+/ {print $1, $3-$1}' | sort -k2 -n | tail -n1 | awk '{print $1}')
+    # 1. Query free space alignment and size using parted
+    LARGEST_START=$(parted -s "$DISK" unit s print free | \
+        grep "Free Space" | \
+        sort -k3 -n -r | \
+        head -n1 | \
+        awk '{print $1}' | tr -d 's')
 
     if [[ -z "$LARGEST_START" ]]; then
         echo "Error: No free unallocated space found on $DISK!"
+        echo "Ensure you have shrunk your Windows partition in Disk Management first."
         exit 1
     fi
 
