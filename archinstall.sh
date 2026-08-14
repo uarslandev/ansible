@@ -89,16 +89,32 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
 
     if [[ -n "$ARCH_EFI_NUM" || -n "$ARCH_ROOT_NUM" ]]; then
         echo "Found previous Arch installation attempt. Cleaning up failed partitions..."
-        [[ -n "$ARCH_EFI_NUM" ]] && sgdisk -d "$ARCH_EFI_NUM" "$DISK"
-        [[ -n "$ARCH_ROOT_NUM" ]] && sgdisk -d "$ARCH_ROOT_NUM" "$DISK"
-        partprobe "$DISK"; udevadm settle; sleep 2
+        [[ -n "$ARCH_EFI_NUM" ]] && sgdisk -d "$ARCH_EFI_NUM" "$DISK" || true
+        [[ -n "$ARCH_ROOT_NUM" ]] && sgdisk -d "$ARCH_ROOT_NUM" "$DISK" || true
+        partprobe "$DISK" || true
+        udevadm settle || true
+        sleep 2
     fi
 
-    echo "Creating new Arch Linux partitions in free space..."
-    sgdisk -n 0:0:+1024M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
-    sgdisk -n 0:0:0     -t 0:"$PART_TYPE" -c 0:"Arch-Root" "$DISK"
-    
-    partprobe "$DISK"; udevadm settle; sleep 2
+    echo "Finding largest unallocated space region..."
+    # Find start sector of the largest contiguous free space block
+    LARGEST_START=$(sgdisk -L "$DISK" | awk '/^  *[0-9]+/ {print $1, $3-$1}' | sort -k2 -n | tail -n1 | awk '{print $1}')
+
+    if [[ -z "$LARGEST_START" ]]; then
+        echo "Error: No free unallocated space found on $DISK!"
+        exit 1
+    fi
+
+    echo "Creating new Arch Linux partitions in free space (starting at sector $LARGEST_START)..."
+    # Create EFI Partition at the start of largest space block
+    sgdisk -n 0:"$LARGEST_START":+1024M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
+    partprobe "$DISK" || true
+    udevadm settle || true
+
+    # Create Root Partition immediately following in remaining space
+    sgdisk -n 0:0:0 -t 0:"$PART_TYPE" -c 0:"Arch-Root" "$DISK"
+    partprobe "$DISK" || true
+    udevadm settle || true
 
     # Safely query partition numbers from GPT partition table by label
     EFI_NUM=$(sgdisk -p "$DISK" | awk '/Arch-EFI/ {print $1}')
@@ -115,7 +131,8 @@ else
     sgdisk -n 1:0:+1024M -t 1:ef00 -c 1:"EFI-system" "$DISK"
     sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
     
-    partprobe "$DISK"; udevadm settle; sleep 2
+    partprobe "$DISK" || true
+    udevadm settle || true
 
     EFI_NUM="1"
     ROOT_NUM="2"
@@ -123,12 +140,12 @@ else
     ROOT_PART="${DISK}${P_SEP}2"
 fi
 
-# Sanity check before formatting
+# Verification
 echo "Target EFI partition: $EFI_PART"
 echo "Target Root partition: $ROOT_PART"
 
-[[ -b "$EFI_PART" ]] || { echo "Error: Partition $EFI_PART was not found."; exit 1; }
-[[ -b "$ROOT_PART" ]] || { echo "Error: Partition $ROOT_PART was not found."; exit 1; }
+[[ -b "$EFI_PART" ]] || { echo "Error: Partition $EFI_PART was not created successfully."; exit 1; }
+[[ -b "$ROOT_PART" ]] || { echo "Error: Partition $ROOT_PART was not created successfully."; exit 1; }
 
 echo "[2/7] Formatting EFI partition ($EFI_PART)..."
 mkfs.vfat -F32 "$EFI_PART"
