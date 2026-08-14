@@ -58,7 +58,6 @@ CUSTOM_PLAYBOOK=""
 POOL_NAME="zroot"
 EFI_MOUNT_POINT=$([[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]] && echo "/efi" || echo "/boot")
 
-# Define boot parameters before entering the heredoc block
 CMDLINE_FINAL=$([[ "$FS_CHOICE" == "1" ]] && echo "zfs=$POOL_NAME/ROOT/default rw zfs_import_policy=force" || echo "rw")
 
 echo -e "\n=================================================="
@@ -76,12 +75,16 @@ read -rp "Are you sure you want to proceed? (type 'YES'): " CONFIRM
 # --- 2. Partitioning & Preparation ---
 echo "[1/7] Preparing disk partitions..."
 swapoff -a || true
-lsblk -l -n -o NAME "$DISK" | tail -n +2 | xargs -I {} umount -l "/dev/{}" 2>/dev/null || true
+
+# Determine disk partition naming prefix (e.g., /dev/nvme0n1p vs /dev/sda)
+P_SEP=$([[ "$DISK" =~ (nvme|mmcblk) ]] && echo "p" || echo "")
+
+PART_TYPE=$([[ "$FS_CHOICE" == "1" ]] && echo "bf00" || echo "8300")
 
 if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     echo "Checking for failed/previous Arch Linux partitions..."
     
-    # Locate partition numbers associated with Arch labels
+    # Clean up old Arch partitions if present
     ARCH_EFI_NUM=$(sgdisk -p "$DISK" 2>/dev/null | awk '/Arch-EFI/ {print $1}')
     ARCH_ROOT_NUM=$(sgdisk -p "$DISK" 2>/dev/null | awk '/Arch-Root/ {print $1}')
 
@@ -93,30 +96,32 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     fi
 
     echo "Creating new Arch Linux partitions in free space..."
-    sgdisk -n 0:0:+1024M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
-    sgdisk -n 0:0:0     -t 0:8300 -c 0:"Arch-Root" "$DISK"
+    # Force creation into dynamic variables by reading the exact newly assigned partition numbers
+    EFI_NUM=$(sgdisk -n 0:0:+1024M -t 0:ef00 -c 0:"Arch-EFI" "$DISK" | grep -oP 'Created partition \K[0-9]+')
+    ROOT_NUM=$(sgdisk -n 0:0:0 -t 0:"$PART_TYPE" -c 0:"Arch-Root" "$DISK" | grep -oP 'Created partition \K[0-9]+')
+
+    EFI_PART="${DISK}${P_SEP}${EFI_NUM}"
+    ROOT_PART="${DISK}${P_SEP}${ROOT_NUM}"
 else
     # Full disk wipe for single-OS Arch installations
     blkdiscard -f "$DISK" 2>/dev/null || true
     zpool labelclear -f "$DISK" 2>/dev/null || true
     wipefs --all --force "$DISK" && sgdisk --zap-all "$DISK"
-    PART_TYPE=$([[ "$FS_CHOICE" == "1" ]] && echo "bf00" || echo "8300")
+    
     sgdisk -n 1:0:+1024M -t 1:ef00 -c 1:"EFI-system" "$DISK"
     sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
-fi
-partprobe "$DISK"; udevadm settle; sleep 2
-
-# Dynamically identify created partitions by label or structure
-if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
-    EFI_DEV_NAME=$(lsblk -l -n -o NAME,LABEL "$DISK" | awk '/Arch-EFI/ {print $1}')
-    ROOT_DEV_NAME=$(lsblk -l -n -o NAME,LABEL "$DISK" | awk '/Arch-Root/ {print $1}')
-    EFI_PART="/dev/$EFI_DEV_NAME"
-    ROOT_PART="/dev/$ROOT_DEV_NAME"
-else
-    P_SEP=$([[ "$DISK" =~ (nvme|mmcblk) ]] && echo "p" || echo "")
+    
+    EFI_NUM="1"
+    ROOT_NUM="2"
     EFI_PART="${DISK}${P_SEP}1"
     ROOT_PART="${DISK}${P_SEP}2"
 fi
+
+partprobe "$DISK"; udevadm settle; sleep 2
+
+# Verify block devices actually exist before trying to format
+[[ -b "$EFI_PART" ]] || { echo "Error: Partition $EFI_PART was not created successfully."; exit 1; }
+[[ -b "$ROOT_PART" ]] || { echo "Error: Partition $ROOT_PART was not created successfully."; exit 1; }
 
 echo "[2/7] Formatting EFI partition ($EFI_PART)..."
 mkfs.vfat -F32 "$EFI_PART"
@@ -204,7 +209,6 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     zgenhostid -f -o /mnt/etc/hostid 0x00babaf1
 fi
 
-# Prepare Ansible directory from host if local site.yml exists
 HOST_SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]:-$0}" )" && pwd )"
 mkdir -p "/mnt/home/$USERNAME/ansible"
 if [[ -f "$HOST_SCRIPT_DIR/site.yml" ]]; then
@@ -269,7 +273,7 @@ elif [[ "$BOOTLOADER_CHOICE" == "1" ]]; then
 
     if [[ -s /efi/EFI/zfsbootmenu/zfsbootmenu.efi ]]; then
         cp /efi/EFI/zfsbootmenu/zfsbootmenu.efi /efi/EFI/BOOT/BOOTX64.EFI
-        efibootmgr --create --disk "$DISK" --part 1 --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
+        efibootmgr --create --disk "$DISK" --part "$EFI_NUM" --label "ZFSBootMenu" --loader "\\EFI\\zfsbootmenu\\zfsbootmenu.efi" --verbose || true
     else
         echo "Error: Failed to fetch ZFSBootMenu EFI binary." && exit 1
     fi
@@ -319,5 +323,5 @@ else
 fi
 
 echo "=================================================="
-echo " Installation Complete! You can now reboot.       "
+echo " Installation Complete! You can now reboot.        "
 echo "=================================================="
