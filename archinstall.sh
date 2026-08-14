@@ -78,7 +78,6 @@ swapoff -a || true
 
 # Determine disk partition naming prefix (e.g., /dev/nvme0n1p vs /dev/sda)
 P_SEP=$([[ "$DISK" =~ (nvme|mmcblk) ]] && echo "p" || echo "")
-
 PART_TYPE=$([[ "$FS_CHOICE" == "1" ]] && echo "bf00" || echo "8300")
 
 if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
@@ -96,9 +95,14 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     fi
 
     echo "Creating new Arch Linux partitions in free space..."
-    # Force creation into dynamic variables by reading the exact newly assigned partition numbers
-    EFI_NUM=$(sgdisk -n 0:0:+1024M -t 0:ef00 -c 0:"Arch-EFI" "$DISK" | grep -oP 'Created partition \K[0-9]+')
-    ROOT_NUM=$(sgdisk -n 0:0:0 -t 0:"$PART_TYPE" -c 0:"Arch-Root" "$DISK" | grep -oP 'Created partition \K[0-9]+')
+    sgdisk -n 0:0:+1024M -t 0:ef00 -c 0:"Arch-EFI" "$DISK"
+    sgdisk -n 0:0:0     -t 0:"$PART_TYPE" -c 0:"Arch-Root" "$DISK"
+    
+    partprobe "$DISK"; udevadm settle; sleep 2
+
+    # Safely query partition numbers from GPT partition table by label
+    EFI_NUM=$(sgdisk -p "$DISK" | awk '/Arch-EFI/ {print $1}')
+    ROOT_NUM=$(sgdisk -p "$DISK" | awk '/Arch-Root/ {print $1}')
 
     EFI_PART="${DISK}${P_SEP}${EFI_NUM}"
     ROOT_PART="${DISK}${P_SEP}${ROOT_NUM}"
@@ -111,17 +115,20 @@ else
     sgdisk -n 1:0:+1024M -t 1:ef00 -c 1:"EFI-system" "$DISK"
     sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
     
+    partprobe "$DISK"; udevadm settle; sleep 2
+
     EFI_NUM="1"
     ROOT_NUM="2"
     EFI_PART="${DISK}${P_SEP}1"
     ROOT_PART="${DISK}${P_SEP}2"
 fi
 
-partprobe "$DISK"; udevadm settle; sleep 2
+# Sanity check before formatting
+echo "Target EFI partition: $EFI_PART"
+echo "Target Root partition: $ROOT_PART"
 
-# Verify block devices actually exist before trying to format
-[[ -b "$EFI_PART" ]] || { echo "Error: Partition $EFI_PART was not created successfully."; exit 1; }
-[[ -b "$ROOT_PART" ]] || { echo "Error: Partition $ROOT_PART was not created successfully."; exit 1; }
+[[ -b "$EFI_PART" ]] || { echo "Error: Partition $EFI_PART was not found."; exit 1; }
+[[ -b "$ROOT_PART" ]] || { echo "Error: Partition $ROOT_PART was not found."; exit 1; }
 
 echo "[2/7] Formatting EFI partition ($EFI_PART)..."
 mkfs.vfat -F32 "$EFI_PART"
