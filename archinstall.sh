@@ -82,7 +82,7 @@ PART_TYPE=$([[ "$FS_CHOICE" == "1" ]] && echo "bf00" || echo "8300")
 
 if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     echo "Checking for failed/previous Arch Linux partitions..."
-    
+
     # Clean up old Arch partitions if present
     ARCH_EFI_NUM=$(sgdisk -p "$DISK" 2>/dev/null | awk '/Arch-EFI/ {print $1}')
     ARCH_ROOT_NUM=$(sgdisk -p "$DISK" 2>/dev/null | awk '/Arch-Root/ {print $1}')
@@ -97,7 +97,7 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     fi
 
     echo "Finding largest unallocated space region..."
-    # 1. Query free space alignment and size using parted
+    # Query free space alignment and size using parted
     LARGEST_START=$(parted -s "$DISK" unit s print free | \
         grep "Free Space" | \
         sort -k3 -n -r | \
@@ -121,7 +121,7 @@ if [[ "$DUAL_BOOT" =~ ^(y|yes)$ ]]; then
     partprobe "$DISK" || true
     udevadm settle || true
 
-    # Safely query partition numbers from GPT partition table by label
+    # Query partition numbers from GPT partition table by label
     EFI_NUM=$(sgdisk -p "$DISK" | awk '/Arch-EFI/ {print $1}')
     ROOT_NUM=$(sgdisk -p "$DISK" | awk '/Arch-Root/ {print $1}')
 
@@ -132,10 +132,10 @@ else
     blkdiscard -f "$DISK" 2>/dev/null || true
     zpool labelclear -f "$DISK" 2>/dev/null || true
     wipefs --all --force "$DISK" && sgdisk --zap-all "$DISK"
-    
+
     sgdisk -n 1:0:+1024M -t 1:ef00 -c 1:"EFI-system" "$DISK"
     sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
-    
+
     partprobe "$DISK" || true
     udevadm settle || true
 
@@ -160,7 +160,7 @@ echo "[3/7] Setting up root filesystem..."
 case "$FS_CHOICE" in
     1) # ZFS Setup
         zgenhostid -f 0x00babaf1
-        
+
         POOL_OPTS=(
             -o ashift=12 
             -o autotrim=on 
@@ -188,7 +188,7 @@ case "$FS_CHOICE" in
         zfs create -o mountpoint=/ "$POOL_NAME/ROOT/default"
         zfs create -o mountpoint=/home "$POOL_NAME/home"
         zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
-        
+
         zpool export "$POOL_NAME"
         zpool import -N -R /mnt "$POOL_NAME"
 
@@ -276,7 +276,12 @@ systemctl enable NetworkManager
 
 if [[ "$FS_CHOICE" == "1" ]]; then
     systemctl enable zfs-import-scan zfs-mount zfs-zed zfs.target
-    sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
+    if [[ "$BOOTLOADER_CHOICE" == "1" ]]; then
+        # When using ZFSBootMenu, remove 'zfs' from HOOKS so initramfs does not prompt again
+        sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block filesystems)/' /etc/mkinitcpio.conf
+    else
+        sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
+    fi
 fi
 mkinitcpio -P
 
@@ -314,9 +319,11 @@ if [[ "$FS_CHOICE" == "1" ]]; then
     echo "[6/7] Setting ZFS pool boot properties..."
     zpool set bootfs="$POOL_NAME/ROOT/default" "$POOL_NAME"
     zpool set org.zfsbootmenu:timeout=10 "$POOL_NAME"
-    
+
     if [[ "$ENABLE_ENC" =~ ^(y|yes)$ ]]; then
+        # Set keysource on pool and root datasets so ZFSBootMenu caches the keys
         zpool set org.zfsbootmenu:keysource="$POOL_NAME" "$POOL_NAME"
+        zfs set org.zfsbootmenu:keysource="$POOL_NAME" "$POOL_NAME/ROOT"
     fi
 
     zfs set org.zfsbootmenu:commandline="rw zfs_import_policy=force" "$POOL_NAME/ROOT"
