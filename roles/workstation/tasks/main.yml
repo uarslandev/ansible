@@ -182,7 +182,7 @@
 
 - name: Deploy pkg-sync utility script
   ansible.builtin.copy:
-    src: pkg-sync
+    src: "{{ playbook_dir }}/scripts/sync_packages.py"
     dest: "{{ user_bin }}/pkg-sync"
     mode: '0755'
 

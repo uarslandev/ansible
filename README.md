@@ -108,7 +108,7 @@ This setup features two-way package synchronization between Arch Linux and Ansib
    - `paru` is automatically bootstrapped if not present on the system.
 
 2. **System -> Ansible (`pkg-sync` CLI Tool)**:
-   - When you install packages manually using `paru -S <pkg>` or remove packages via `paru -R <pkg>`, use `pkg-sync --host pc` to keep the combined shared and pc-specific package manifests updated. New packages are saved to `host_vars/pc.yml`.
+   - When a matching `host_vars/<hostname>.yml` exists, `pkg-sync` automatically includes it alongside the shared manifest and saves host-specific changes there. Use `--host pc` to select a host explicitly.
 
    ```bash
    # Check package drift for pc

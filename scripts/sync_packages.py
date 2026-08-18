@@ -20,6 +20,7 @@ import sys
 import argparse
 import subprocess
 import pathlib
+import socket
 import yaml
 
 # ANSI Color formatting
@@ -49,6 +50,31 @@ def find_config_path(override_path=None):
             return candidate.resolve()
 
     sys.exit(f"{RED}Error:{RESET} Could not locate group_vars/workstations.yml. Use --config to specify path.")
+
+
+def find_host_config_path(shared_path, host=None):
+    """Return the requested or current host's package manifest when available."""
+    host_vars_dir = shared_path.parent.parent / "host_vars"
+
+    if host:
+        path = host_vars_dir / f"{host}.yml"
+        if not path.exists():
+            sys.exit(f"{RED}Error:{RESET} Host package config does not exist: {path}")
+        return path.resolve()
+
+    # `socket.gethostname()` is normally the same name used in inventory. Also
+    # try its short form for systems whose hostname is fully qualified.
+    hostname = socket.gethostname()
+    candidates = [hostname]
+    if "." in hostname:
+        candidates.append(hostname.split(".", 1)[0])
+
+    for candidate in candidates:
+        path = host_vars_dir / f"{candidate}.yml"
+        if path.exists():
+            return path.resolve()
+
+    return None
 
 
 def load_config(config_path, host_config_path=None):
@@ -210,7 +236,11 @@ def cmd_remove(args, config_path, data, shared_config=None):
 def main():
     parser = argparse.ArgumentParser(description="Synchronize Arch Linux packages with Ansible config.")
     parser.add_argument("--config", "-c", help="Path to group_vars/workstations.yml")
-    parser.add_argument("--host", help="Hostname whose host_vars package file should be included and updated")
+    parser.add_argument(
+        "--host",
+        help="Hostname whose host_vars package file should be included and updated "
+        "(defaults to the current host when its manifest exists)",
+    )
     parser.add_argument("--check", action="store_true", help="Check for drift without modifying config")
     parser.add_argument("--apply", "-a", action="store_true", help="Automatically update workstations.yml to match system")
     parser.add_argument("--interactive", "-i", action="store_true", help="Interactively select packages to add/remove")
@@ -221,10 +251,8 @@ def main():
     shared_path = find_config_path(args.config)
     shared_config = None
     config_path = shared_path
-    if args.host:
-        host_path = shared_path.parent.parent / "host_vars" / f"{args.host}.yml"
-        if not host_path.exists():
-            sys.exit(f"{RED}Error:{RESET} Host package config does not exist: {host_path}")
+    host_path = find_host_config_path(shared_path, args.host)
+    if host_path:
         shared_config = load_config(shared_path)
         config_path = host_path
 
@@ -258,7 +286,11 @@ def main():
 
     # Print summary
     print(f"{CYAN}{BOLD}=== Ansible Package Synchronization Audit ==={RESET}")
-    print(f"Config File: {BOLD}{config_path}{RESET}\n")
+    if shared_config is not None:
+        print(f"Shared Config: {BOLD}{shared_path}{RESET}")
+        print(f"Host Config:   {BOLD}{config_path}{RESET}\n")
+    else:
+        print(f"Config File: {BOLD}{config_path}{RESET}\n")
 
     has_drift = False
 
