@@ -73,7 +73,6 @@ aur_packages:
   - catppuccin-gtk-theme-mocha
   - oh-my-zsh-git
   - paru
-  - paru-debug
   - tor-browser-alpha-bin
   - vesktop-bin
   - wireguard-go-git
