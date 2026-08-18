@@ -276,12 +276,7 @@ systemctl enable NetworkManager
 
 if [[ "$FS_CHOICE" == "1" ]]; then
     systemctl enable zfs-import-scan zfs-mount zfs-zed zfs.target
-    if [[ "$BOOTLOADER_CHOICE" == "1" ]]; then
-        # When using ZFSBootMenu, remove 'zfs' from HOOKS so initramfs does not prompt again
-        sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block filesystems)/' /etc/mkinitcpio.conf
-    else
-        sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
-    fi
+    sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block zfs filesystems)/' /etc/mkinitcpio.conf
 fi
 mkinitcpio -P
 
