@@ -2,6 +2,14 @@
 # Automatic package pruning (auto-uninstall when removed from system_packages)
 # ==============================================================================
 
+- name: Combine shared and host-specific pacman packages
+  ansible.builtin.set_fact:
+    managed_system_packages: "{{ (system_packages + (host_system_packages | default([]))) | unique }}"
+
+- name: Combine shared and host-specific AUR packages
+  ansible.builtin.set_fact:
+    managed_aur_packages: "{{ (aur_packages + (host_aur_packages | default([]))) | unique }}"
+
 - name: Check for previously managed pacman package manifest
   ansible.builtin.stat:
     path: /var/lib/ansible_managed_pacman_packages.json
@@ -19,7 +27,7 @@
 
 - name: Calculate packages to auto-remove
   ansible.builtin.set_fact:
-    packages_to_remove: "{{ (previous_pacman_packages | difference(system_packages)) | difference(['tar', 'util-linux', 'wpa_supplicant', 'zfs-utils', 'base', 'base-devel', 'linux', 'systemd']) }}"
+    packages_to_remove: "{{ (previous_pacman_packages | difference(managed_system_packages)) | difference(['tar', 'util-linux', 'wpa_supplicant', 'zfs-utils', 'base', 'base-devel', 'linux', 'systemd']) }}"
 
 - name: Auto-remove packages no longer listed in system_packages
   become: true
@@ -31,13 +39,13 @@
 - name: Install current Arch packages
   become: true
   ansible.builtin.pacman:
-    name: "{{ system_packages }}"
+    name: "{{ managed_system_packages }}"
     state: present
 
 - name: Save updated pacman package manifest
   become: true
   ansible.builtin.copy:
-    content: "{{ system_packages | to_nice_json }}"
+    content: "{{ managed_system_packages | to_nice_json }}"
     dest: /var/lib/ansible_managed_pacman_packages.json
     mode: '0644'
 
@@ -142,7 +150,7 @@
 
 - name: Calculate AUR packages to auto-remove
   ansible.builtin.set_fact:
-    aur_packages_to_remove: "{{ previous_aur_packages | difference(aur_packages | default([])) }}"
+    aur_packages_to_remove: "{{ previous_aur_packages | difference(managed_aur_packages) }}"
 
 - name: Auto-remove AUR packages no longer listed in aur_packages
   become: true
@@ -159,15 +167,15 @@
   become: true
   become_user: "{{ target_user }}"
   ansible.builtin.command:
-    cmd: "paru -S --noconfirm --needed {{ aur_packages | join(' ') }}"
+    cmd: "paru -S --noconfirm --needed {{ managed_aur_packages | join(' ') }}"
   when:
-    - aur_packages | default([]) | length > 0
+    - managed_aur_packages | length > 0
     - paru_binary_stat.rc == 0
 
 - name: Save updated AUR package manifest
   become: true
   ansible.builtin.copy:
-    content: "{{ aur_packages | default([]) | to_nice_json }}"
+    content: "{{ managed_aur_packages | to_nice_json }}"
     dest: /var/lib/ansible_managed_aur_packages.json
     mode: '0644'
   when: paru_binary_stat.rc == 0

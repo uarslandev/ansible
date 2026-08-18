@@ -11,10 +11,14 @@ A production-grade Ansible monorepo designed to provision and maintain **minimal
 ├── ansible.cfg              # Default Ansible runtime configuration
 ├── inventory.ini            # Infrastructure directory (localhost, workstations, servers)
 ├── site.yml                 # Master playbook orchestrating all roles
+├── workstation.yml          # Shared workstation playbook imported by each host
+├── pc.yml                   # Entry point for the local pc workstation
 ├── group_vars/              # Variables scoped by host groups
 │   ├── all.yml              # Global settings (user home, dotfiles repo, bin path)
 │   ├── workstations.yml     # Minimal Arch package set and tool versions
 │   └── servers.yml          # Server node variables
+├── host_vars/               # Machine-specific variables
+│   └── pc.yml               # Packages unique to pc
 └── roles/                   # Modular automation roles
     ├── common/              # Base setup (~/.local/bin)
     ├── workstation/         # Arch pacman CLI tools, sway/ly desktop, and paru bootstrap
@@ -39,10 +43,10 @@ A production-grade Ansible monorepo designed to provision and maintain **minimal
 
 ### 1. Run Local Provisioning (Arch Linux / WSL)
 
-Execute the master playbook against `localhost`:
+Execute the host-specific playbook:
 
 ```bash
-ansible-playbook site.yml --ask-become-pass
+ansible-playbook pc.yml --ask-become-pass
 ```
 
 > **Note:** `--ask-become-pass` prompts for your `sudo` password to perform pacman package installations cleanly.
@@ -55,11 +59,21 @@ Run only the DevOps CLI tools setup (no sudo needed):
 ansible-playbook site.yml --tags devops
 ```
 
-Target only local workstation tasks:
+Run the shared configuration for every workstation:
 
 ```bash
 ansible-playbook -i inventory.ini site.yml --limit workstations --ask-become-pass
 ```
+
+### Add another workstation
+
+1. Add its hostname to `[workstations]` in `inventory.ini`.
+2. Create `host_vars/<hostname>.yml` with `host_system_packages` and/or
+   `host_aur_packages`. These are added to the shared lists in
+   `group_vars/workstations.yml`.
+3. Create `<hostname>.yml` containing the same `import_playbook: workstation.yml`
+   pattern as `pc.yml`, with `target_hosts` set to the hostname.
+4. Run `ansible-playbook <hostname>.yml --ask-become-pass`.
 
 ---
 
@@ -89,26 +103,26 @@ ansible-playbook -i inventory.ini site.yml --limit workstations --ask-become-pas
 This setup features two-way package synchronization between Arch Linux and Ansible:
 
 1. **Ansible -> System (Playbook Execution)**:
-   - Running `ansible-playbook site.yml` installs all packages in `group_vars/workstations.yml`.
+   - Running `ansible-playbook pc.yml` installs the shared packages in `group_vars/workstations.yml` plus packages in `host_vars/pc.yml`.
    - Any package removed from `system_packages` or `aur_packages` is automatically uninstalled from Arch Linux.
    - `paru` is automatically bootstrapped if not present on the system.
 
 2. **System -> Ansible (`pkg-sync` CLI Tool)**:
-   - When you install packages manually using `paru -S <pkg>` or remove packages via `paru -R <pkg>`, use `pkg-sync` to keep `group_vars/workstations.yml` updated.
+   - When you install packages manually using `paru -S <pkg>` or remove packages via `paru -R <pkg>`, use `pkg-sync --host pc` to keep the combined shared and pc-specific package manifests updated. New packages are saved to `host_vars/pc.yml`.
 
    ```bash
-   # Check package drift between system and workstations.yml
-   pkg-sync
+   # Check package drift for pc
+   pkg-sync --host pc
 
    # Automatically update workstations.yml to match your installed packages
-   pkg-sync --apply
+   pkg-sync --host pc --apply
 
    # Interactively review and update package lists
-   pkg-sync --interactive
+   pkg-sync --host pc --interactive
 
    # Explicitly add or remove a package (auto-detects pacman vs AUR)
-   pkg-sync --add spotify
-   pkg-sync --remove foot
+   pkg-sync --host pc --add spotify
+   pkg-sync --host pc --remove foot
    ```
 
 3. **Playbook Package Audit**:
@@ -131,4 +145,3 @@ To manage remote Linux servers or laptops:
    ```bash
    ansible-playbook site.yml --limit servers
    ```
-

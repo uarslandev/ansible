@@ -12,7 +12,8 @@ Usage:
   pkg-sync --interactive            Interactively approve/reject package additions and removals
   pkg-sync --add <pkg>              Add a package to workstations.yml (auto-detects pacman vs AUR)
   pkg-sync --remove <pkg>           Remove a package from workstations.yml
-  pkg-sync --config <path>          Path to group_vars/workstations.yml
+  pkg-sync --host <hostname>        Include and update host_vars/<hostname>.yml
+  pkg-sync --config <path>          Path to the shared workstation config
 """
 
 import sys
@@ -50,19 +51,55 @@ def find_config_path(override_path=None):
     sys.exit(f"{RED}Error:{RESET} Could not locate group_vars/workstations.yml. Use --config to specify path.")
 
 
-def load_config(config_path):
+def load_config(config_path, host_config_path=None):
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     data.setdefault("system_packages", [])
     data.setdefault("aur_packages", [])
     data.setdefault("devops_tool_versions", {})
+
+    if host_config_path:
+        with open(host_config_path, "r", encoding="utf-8") as f:
+            host_data = yaml.safe_load(f) or {}
+        data["system_packages"] = data["system_packages"] + host_data.get("host_system_packages", [])
+        data["aur_packages"] = data["aur_packages"] + host_data.get("host_aur_packages", [])
+
     return data
 
 
-def save_config(config_path, data):
+def save_config(config_path, data, shared_config=None):
     system_packages = sorted(list(set(data.get("system_packages", []))))
     aur_packages = sorted(list(set(data.get("aur_packages", []))))
     devops_tool_versions = data.get("devops_tool_versions", {})
+
+    if shared_config is not None:
+        shared_system = set(shared_config.get("system_packages", []))
+        shared_aur = set(shared_config.get("aur_packages", []))
+        lines = [
+            "---",
+            "# Packages unique to this host; shared packages are in group_vars/workstations.yml.",
+            "host_system_packages:",
+        ]
+        host_system_packages = sorted(set(system_packages) - shared_system)
+        host_aur_packages = sorted(set(aur_packages) - shared_aur)
+        if host_system_packages:
+            for pkg in host_system_packages:
+                lines.append(f"  - {pkg}")
+        else:
+            lines.append("  []")
+
+        lines.append("")
+        lines.append("host_aur_packages:")
+        if host_aur_packages:
+            for pkg in host_aur_packages:
+                lines.append(f"  - {pkg}")
+        else:
+            lines.append("  []")
+        lines.append("")
+
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        return
 
     lines = [
         "---",
@@ -126,8 +163,12 @@ def is_aur_package(pkg):
         return False
 
 
-def cmd_add(args, config_path):
-    data = load_config(config_path)
+def is_paru_companion_package(pkg):
+    """Ignore paru split/debug packages; only the paru helper itself is managed."""
+    return pkg.startswith("paru-")
+
+
+def cmd_add(args, config_path, data, shared_config=None):
     pkg = args.add.strip()
 
     if is_aur_package(pkg):
@@ -142,12 +183,11 @@ def cmd_add(args, config_path):
         return
 
     data[target_list].append(pkg)
-    save_config(config_path, data)
+    save_config(config_path, data, shared_config)
     print(f"{GREEN}✓ Added '{pkg}' to {list_name} in {config_path.name}{RESET}")
 
 
-def cmd_remove(args, config_path):
-    data = load_config(config_path)
+def cmd_remove(args, config_path, data, shared_config=None):
     pkg = args.remove.strip()
     removed = False
 
@@ -162,7 +202,7 @@ def cmd_remove(args, config_path):
         print(f"{GREEN}✓ Removed '{pkg}' from aur_packages.{RESET}")
 
     if removed:
-        save_config(config_path, data)
+        save_config(config_path, data, shared_config)
     else:
         print(f"{YELLOW}Package '{pkg}' was not found in Ansible configuration.{RESET}")
 
@@ -170,6 +210,7 @@ def cmd_remove(args, config_path):
 def main():
     parser = argparse.ArgumentParser(description="Synchronize Arch Linux packages with Ansible config.")
     parser.add_argument("--config", "-c", help="Path to group_vars/workstations.yml")
+    parser.add_argument("--host", help="Hostname whose host_vars package file should be included and updated")
     parser.add_argument("--check", action="store_true", help="Check for drift without modifying config")
     parser.add_argument("--apply", "-a", action="store_true", help="Automatically update workstations.yml to match system")
     parser.add_argument("--interactive", "-i", action="store_true", help="Interactively select packages to add/remove")
@@ -177,16 +218,25 @@ def main():
     parser.add_argument("--remove", help="Remove a specific package from workstations.yml")
 
     args = parser.parse_args()
-    config_path = find_config_path(args.config)
+    shared_path = find_config_path(args.config)
+    shared_config = None
+    config_path = shared_path
+    if args.host:
+        host_path = shared_path.parent.parent / "host_vars" / f"{args.host}.yml"
+        if not host_path.exists():
+            sys.exit(f"{RED}Error:{RESET} Host package config does not exist: {host_path}")
+        shared_config = load_config(shared_path)
+        config_path = host_path
+
+    data = load_config(shared_path, config_path if shared_config is not None else None)
 
     if args.add:
-        cmd_add(args, config_path)
+        cmd_add(args, config_path, data, shared_config)
         return
     if args.remove:
-        cmd_remove(args, config_path)
+        cmd_remove(args, config_path, data, shared_config)
         return
 
-    data = load_config(config_path)
     cfg_system = set(data.get("system_packages", []))
     cfg_aur = set(data.get("aur_packages", []))
 
@@ -199,7 +249,12 @@ def main():
 
     # 2. Packages installed on system but NOT listed in config (Newly installed)
     # Note: Only list explicit AUR pkgs or explicit native pkgs
-    new_aur = installed_aur - cfg_aur
+    # paru-debug and other paru split packages are build companions, not
+    # independently managed AUR packages. Keep only the main `paru` package.
+    new_aur = {
+        pkg for pkg in (installed_aur - cfg_aur)
+        if not is_paru_companion_package(pkg)
+    }
 
     # Print summary
     print(f"{CYAN}{BOLD}=== Ansible Package Synchronization Audit ==={RESET}")
@@ -250,7 +305,7 @@ def main():
         # Remove uninstalled packages from config
         data["system_packages"] = sorted(list(cfg_system - uninstalled_system))
         data["aur_packages"] = sorted(list((cfg_aur - uninstalled_aur) | new_aur))
-        save_config(config_path, data)
+        save_config(config_path, data, shared_config)
         print(f"{GREEN}✓ Successfully updated {config_path.name}!{RESET}")
         if uninstalled_system or uninstalled_aur:
             print(f"  - Removed {len(uninstalled_system) + len(uninstalled_aur)} uninstalled packages.")
@@ -283,7 +338,7 @@ def main():
                         modified = True
 
         if modified:
-            save_config(config_path, data)
+            save_config(config_path, data, shared_config)
             print(f"{GREEN}✓ Saved interactive changes to {config_path.name}{RESET}")
         else:
             print("No changes saved.")

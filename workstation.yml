@@ -1,0 +1,18 @@
+---
+# Shared workstation configuration. Host entry-point playbooks import this file
+# and set target_hosts to their inventory hostname.
+- name: Apply Common Base Infrastructure Setup
+  hosts: "{{ target_hosts | default('workstations') }}"
+  roles:
+    - role: common
+      tags: [common, base]
+
+- name: Provision Developer Workstation Environment
+  hosts: "{{ target_hosts | default('workstations') }}"
+  roles:
+    - role: workstation
+      tags: [workstation, packages]
+    - role: devops_tools
+      tags: [devops, k8s, terraform]
+    - role: dotfiles
+      tags: [dotfiles, chezmoi]

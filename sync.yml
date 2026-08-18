@@ -6,9 +6,9 @@
   hosts: workstations
   gather_facts: true
   tasks:
-    - name: Audit package drift between system and group_vars/workstations.yml
+    - name: Audit package drift between system and shared and host package manifests
       ansible.builtin.command:
-        cmd: "{{ user_bin }}/pkg-sync {{ '--apply' if (apply | default(false) | bool) else '' }}"
+        cmd: "{{ user_bin }}/pkg-sync --host {{ inventory_hostname }} {{ '--apply' if (apply | default(false) | bool) else '' }}"
       register: pkg_sync_out
       changed_when: "'Successfully updated' in pkg_sync_out.stdout"
 
