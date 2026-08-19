@@ -1,10 +1,11 @@
 ---
-# Packages unique to the "pc" workstation. Shared workstation packages remain
-# in group_vars/workstations.yml and are combined by the workstation role.
-host_system_packages: []
+# Packages unique to this host; shared packages are in group_vars/workstations.yml.
+host_system_packages:
+  []
 
 host_aur_packages:
   - lib32-nvidia-580xx-utils
   - lib32-opencl-nvidia-580xx
   - nvidia-580xx-dkms
   - nvidia-580xx-utils
+  - syncthing-bin
