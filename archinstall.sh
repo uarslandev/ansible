@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "=================================================="
-echo "      Arch Linux Automated System Installer       "
+echo "       Arch Linux Automated System Installer        "
 echo "=================================================="
 
 # --- 1. Interactive Inputs ---
@@ -52,6 +52,8 @@ fi
 
 echo -e "\nRun Ansible after installation? (y/N): "
 read -rp "" RUN_ANSIBLE; RUN_ANSIBLE=${RUN_ANSIBLE,,}
+CUSTOM_PLAYBOOK=""
+[[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]] && read -rp "Enter custom playbook filename (leave empty for auto-detect): " CUSTOM_PLAYBOOK
 
 POOL_NAME="zroot"
 EFI_MOUNT_POINT=$([[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]] && echo "/efi" || echo "/boot")
@@ -62,9 +64,9 @@ echo -e "\n=================================================="
 echo "WARNING: Target Partitions on $DISK will be configured!"
 echo "Filesystem: $(case $FS_CHOICE in 1) echo ZFS;; 2) echo ext4;; 3) echo btrfs;; esac)"
 echo "Encryption: $([[ "$ENABLE_ENC" =~ ^(y|yes)$ ]] && echo 'ENABLED (Passphrase)' || echo 'DISABLED')"
-echo "Username:   $USERNAME | Timezone: $TIMEZONE"
+echo "Username:    $USERNAME | Timezone: $TIMEZONE"
 echo "Bootloader: $(case $BOOTLOADER_CHOICE in 1) echo ZFSBootMenu;; 2) echo GRUB;; 3) echo systemd-boot;; esac)"
-echo "Dual-Boot:  $([[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo 'YES' || echo 'NO')"
+echo "Dual-Boot:   $([[ "$DUAL_BOOT" =~ ^(y|yes)$ ]] && echo 'YES' || echo 'NO')"
 echo "Run Ansible:$([[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]] && echo 'YES' || echo 'NO')"
 echo "=================================================="
 read -rp "Are you sure you want to proceed? (type 'YES'): " CONFIRM
@@ -132,7 +134,7 @@ else
     wipefs --all --force "$DISK" && sgdisk --zap-all "$DISK"
 
     sgdisk -n 1:0:+1024M -t 1:ef00 -c 1:"EFI-system" "$DISK"
-    sgdisk -n 2:0:0     -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
+    sgdisk -n 2:0:0      -t 2:"$PART_TYPE" -c 2:"Arch-Root" "$DISK"
 
     partprobe "$DISK" || true
     udevadm settle || true
@@ -323,21 +325,21 @@ if [[ "$FS_CHOICE" == "1" ]]; then
 fi
 
 if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
-    ANSIBLE_DIR="/mnt/home/$USERNAME/ansible"
-    HOST_PLAYBOOK="$ANSIBLE_DIR/${HOSTNAME}.yml"
-
-    if [[ -f "$HOST_PLAYBOOK" ]]; then
-        PLAYBOOK_TARGET="$HOSTNAME"
-        echo "Found host-specific playbook for '$HOSTNAME'. Running it..."
-    else
-        PLAYBOOK_TARGET="workstation.yml"
-        echo "No host-specific playbook for '$HOSTNAME'. Running shared workstation.yml..."
-    fi
-
+    echo "Running Ansible playbook..."
     arch-chroot /mnt /bin/bash -c "
         chown -R $USERNAME:$USERNAME /home/$USERNAME
         cd /home/$USERNAME/ansible
-        su - $USERNAME -c \"cd ~/ansible && ansible-playbook $PLAYBOOK_TARGET --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
+        PLAYBOOK='$CUSTOM_PLAYBOOK'
+        if [[ -z \"\$PLAYBOOK\" ]]; then
+            for f in \"$HOSTNAME.yml\" local.yml site.yml main.yml workstation.yml; do
+                [[ -f \"\$f\" ]] && { PLAYBOOK=\"\$f\"; break; }
+            done
+        fi
+        if [[ -n \"\$PLAYBOOK\" ]]; then
+            su - $USERNAME -c \"cd ~/ansible && ansible-playbook -i inventory.ini \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
+        else
+            echo 'No valid playbook found. Skipping.'
+        fi
     "
 fi
 
