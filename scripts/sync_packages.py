@@ -82,7 +82,6 @@ def load_config(config_path, host_config_path=None):
         data = yaml.safe_load(f) or {}
     data.setdefault("system_packages", [])
     data.setdefault("aur_packages", [])
-    data.setdefault("devops_tool_versions", {})
 
     if host_config_path:
         with open(host_config_path, "r", encoding="utf-8") as f:
@@ -96,7 +95,6 @@ def load_config(config_path, host_config_path=None):
 def save_config(config_path, data, shared_config=None):
     system_packages = sorted(list(set(data.get("system_packages", []))))
     aur_packages = sorted(list(set(data.get("aur_packages", []))))
-    devops_tool_versions = data.get("devops_tool_versions", {})
 
     if shared_config is not None:
         shared_system = set(shared_config.get("system_packages", []))
@@ -144,11 +142,6 @@ def save_config(config_path, data, shared_config=None):
     else:
         lines.append("  []")
 
-    lines.append("")
-    lines.append("# Versions for standalone DevOps tools")
-    lines.append("devops_tool_versions:")
-    for k, v in devops_tool_versions.items():
-        lines.append(f'  {k}: "{v}"')
     lines.append("")
 
     content = "\n".join(lines)

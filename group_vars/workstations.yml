@@ -22,6 +22,11 @@ system_packages:
   - git
   - github-cli
   - gwenview
+  - helm
+  - k9s
+  - kubectl
+  - starship
+  - terraform
   - htop
   - intel-ucode
   - iwd
@@ -72,6 +77,7 @@ aur_packages:
   - antigravity-cli
   - catppuccin-cursors-mocha
   - catppuccin-gtk-theme-mocha
+  - kind
   - oh-my-zsh-git
   - paru
   - tor-browser-alpha-bin
@@ -79,18 +85,8 @@ aur_packages:
   - wireguard-go-git
   - zfs-utils
   - zsh-autosuggestions-git
-  - zsh-theme-powerlevel10k-git
 
 # Systemd services enabled on all workstations
 system_services:
   - bluetooth.service
   - NetworkManager.service
-
-# Versions for standalone DevOps tools
-devops_tool_versions:
-  kubectl: "v1.31.1"
-  helm: "v3.16.1"
-  k9s: "v0.32.5"
-  terraform: "1.9.6"
-  kind: "v0.24.0"
-  starship: "v1.21.1"

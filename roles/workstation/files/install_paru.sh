@@ -54,14 +54,12 @@ def load_config(config_path):
         data = yaml.safe_load(f) or {}
     data.setdefault("system_packages", [])
     data.setdefault("aur_packages", [])
-    data.setdefault("devops_tool_versions", {})
     return data
 
 
 def save_config(config_path, data):
     system_packages = sorted(list(set(data.get("system_packages", []))))
     aur_packages = sorted(list(set(data.get("aur_packages", []))))
-    devops_tool_versions = data.get("devops_tool_versions", {})
 
     lines = [
         "---",
@@ -80,11 +78,6 @@ def save_config(config_path, data):
     else:
         lines.append("  []")
 
-    lines.append("")
-    lines.append("# Versions for standalone DevOps tools")
-    lines.append("devops_tool_versions:")
-    for k, v in devops_tool_versions.items():
-        lines.append(f'  {k}: "{v}"')
     lines.append("")
 
     content = "\n".join(lines)
