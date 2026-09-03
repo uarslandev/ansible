@@ -218,3 +218,18 @@
   when:
     - ansible_service_mgr == "systemd"
     - ly_unit_stat.stat.exists or ly_templated_unit_stat.stat.exists
+
+- name: Combine shared and host-specific systemd services
+  ansible.builtin.set_fact:
+    managed_system_services: "{{ (system_services + (host_system_services | default([]))) | unique }}"
+
+- name: Enable default systemd services
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: "{{ 'started' if (ansible_facts['is_chroot'] is not defined or not ansible_facts['is_chroot']) else omit }}"
+  loop: "{{ managed_system_services }}"
+  when:
+    - ansible_service_mgr == "systemd"
+    - managed_system_services | length > 0

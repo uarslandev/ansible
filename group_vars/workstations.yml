@@ -82,6 +82,11 @@ aur_packages:
   - zsh-autosuggestions-git
   - zsh-theme-powerlevel10k-git
 
+# Systemd services enabled on all workstations
+system_services:
+  - bluetooth.service
+  - NetworkManager.service
+
 # Versions for standalone DevOps tools
 devops_tool_versions:
   kubectl: "v1.31.1"

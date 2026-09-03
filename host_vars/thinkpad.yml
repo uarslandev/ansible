@@ -3,5 +3,10 @@
 host_system_packages:
   []
 
-host_aur_packages:
+# Systemd services unique to this host; shared services are in group_vars/workstations.yml.
+host_system_services:
   []
+
+host_aur_packages:
+  - google-chrome
+  - opencode-bin
