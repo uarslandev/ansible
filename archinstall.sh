@@ -52,8 +52,6 @@ fi
 
 echo -e "\nRun Ansible after installation? (y/N): "
 read -rp "" RUN_ANSIBLE; RUN_ANSIBLE=${RUN_ANSIBLE,,}
-CUSTOM_PLAYBOOK=""
-[[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]] && read -rp "Enter custom playbook filename (leave empty for auto-detect): " CUSTOM_PLAYBOOK
 
 POOL_NAME="zroot"
 EFI_MOUNT_POINT=$([[ "$FS_CHOICE" == "1" && "$BOOTLOADER_CHOICE" == "1" ]] && echo "/efi" || echo "/boot")
@@ -325,21 +323,21 @@ if [[ "$FS_CHOICE" == "1" ]]; then
 fi
 
 if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
-    echo "Running Ansible playbook..."
+    ANSIBLE_DIR="/mnt/home/$USERNAME/ansible"
+    HOST_PLAYBOOK="$ANSIBLE_DIR/${HOSTNAME}.yml"
+
+    if [[ -f "$HOST_PLAYBOOK" ]]; then
+        PLAYBOOK_TARGET="$HOSTNAME"
+        echo "Found host-specific playbook for '$HOSTNAME'. Running it..."
+    else
+        PLAYBOOK_TARGET="workstation.yml"
+        echo "No host-specific playbook for '$HOSTNAME'. Running shared workstation.yml..."
+    fi
+
     arch-chroot /mnt /bin/bash -c "
         chown -R $USERNAME:$USERNAME /home/$USERNAME
         cd /home/$USERNAME/ansible
-        PLAYBOOK='$CUSTOM_PLAYBOOK'
-        if [[ -z \"\$PLAYBOOK\" ]]; then
-            for f in local.yml site.yml main.yml; do
-                [[ -f \"\$f\" ]] && { PLAYBOOK=\"\$f\"; break; }
-            done
-        fi
-        if [[ -n \"\$PLAYBOOK\" ]]; then
-            su - $USERNAME -c \"cd ~/ansible && ansible-playbook \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
-        else
-            echo 'No valid playbook found. Skipping.'
-        fi
+        su - $USERNAME -c \"cd ~/ansible && ansible-playbook $PLAYBOOK_TARGET --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
     "
 fi
 

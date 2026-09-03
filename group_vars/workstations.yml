@@ -2,6 +2,7 @@
 # Packages installed via pacman on Arch Linux workstations
 system_packages:
   - amd-ucode
+  - inetutils
   - ansible
   - ark
   - base
@@ -76,7 +77,7 @@ aur_packages:
   - tor-browser-alpha-bin
   - vesktop-bin
   - wireguard-go-git
-  - zfs-linux
+  - zfs-dkms
   - zfs-utils
   - zsh-autosuggestions-git
   - zsh-theme-powerlevel10k-git

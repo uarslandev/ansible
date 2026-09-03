@@ -1,0 +1,6 @@
+---
+# Host-specific entry point. Add another <hostname>.yml file using this same
+# import pattern when adding another workstation.
+- import_playbook: workstation.yml
+  vars:
+    target_hosts: thinkpad

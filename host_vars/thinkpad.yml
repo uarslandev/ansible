@@ -1,0 +1,7 @@
+---
+# Packages unique to this host; shared packages are in group_vars/workstations.yml.
+host_system_packages:
+  []
+
+host_aur_packages:
+  []
