@@ -77,7 +77,6 @@ aur_packages:
   - tor-browser-alpha-bin
   - vesktop-bin
   - wireguard-go-git
-  - zfs-dkms
   - zfs-utils
   - zsh-autosuggestions-git
   - zsh-theme-powerlevel10k-git
