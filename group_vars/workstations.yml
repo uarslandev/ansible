@@ -13,6 +13,7 @@ system_packages:
   - chezmoi
   - curl
   - dkms
+  - docker
   - dolphin
   - efibootmgr
   - fastfetch
@@ -89,4 +90,5 @@ aur_packages:
 # Systemd services enabled on all workstations
 system_services:
   - bluetooth.service
+  - docker.service
   - NetworkManager.service

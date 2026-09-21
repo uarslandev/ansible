@@ -1,3 +1,16 @@
 ---
 # DevOps tools are installed via pacman/paru as regular packages.
 # See system_packages and aur_packages in group_vars/workstations.yml.
+
+- name: Ensure docker group exists
+  become: true
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+- name: Add target user to docker group
+  become: true
+  ansible.builtin.user:
+    name: "{{ target_user }}"
+    groups: docker
+    append: true
