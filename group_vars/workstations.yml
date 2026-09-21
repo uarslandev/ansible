@@ -4,6 +4,7 @@ system_packages:
   - amd-ucode
   - inetutils
   - ansible
+  - ansible-lint
   - ark
   - base
   - base-devel
