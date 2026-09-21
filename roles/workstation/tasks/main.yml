@@ -41,6 +41,7 @@
   ansible.builtin.pacman:
     name: "{{ managed_system_packages }}"
     state: present
+    update_cache: true
 
 - name: Save updated pacman package manifest
   become: true
