@@ -98,7 +98,7 @@ ansible-playbook -i inventory.ini site.yml --limit workstations --ask-become-pas
 
 ---
 
-## 📦 Package Management & Synchronization (`pkg-sync`)
+## 📦 Package Management & Synchronization (`pkgSync`)
 
 This setup features two-way package synchronization between Arch Linux and Ansible:
 
@@ -107,22 +107,22 @@ This setup features two-way package synchronization between Arch Linux and Ansib
    - Any package removed from `system_packages` or `aur_packages` is automatically uninstalled from Arch Linux.
    - `paru` is automatically bootstrapped if not present on the system.
 
-2. **System -> Ansible (`pkg-sync` CLI Tool)**:
-   - When a matching `host_vars/<hostname>.yml` exists, `pkg-sync` automatically includes it alongside the shared manifest and saves host-specific changes there. Use `--host pc` to select a host explicitly.
+2. **System -> Ansible (`pkgSync` CLI Tool)**:
+   - Shared packages live in `group_vars/workstations.yml`. The audit on a host also merges its `host_vars/<hostname>.yml` (read-only) so device-specific packages aren't reported as "new".
+   - New packages are written to the **shared** config by default. Use `--host <name>` to route a package to one device's `host_vars/<name>.yml` instead (e.g. NVIDIA drivers on a specific machine).
 
    ```bash
-   # Check package drift for pc
-   pkg-sync --host pc
+   # Audit on the current host (device-specific packages shown read-only)
+   pkgSync
 
-   # Automatically update workstations.yml to match your installed packages
-   pkg-sync --host pc --apply
+   # Add new packages to the shared workstations.yml (default)
+   pkgSync --apply
+   pkgSync --add spotify
 
-   # Interactively review and update package lists
-   pkg-sync --host pc --interactive
-
-   # Explicitly add or remove a package (auto-detects pacman vs AUR)
-   pkg-sync --host pc --add spotify
-   pkg-sync --host pc --remove foot
+   # Route packages to a specific device's host_vars file instead
+   pkgSync --host pc --apply
+   pkgSync --host pc --add nvidia-dkms
+   pkgSync --host pc --remove foot
    ```
 
 3. **Playbook Package Audit**:

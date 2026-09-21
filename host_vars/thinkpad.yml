@@ -4,6 +4,4 @@ host_system_packages:
   []
 
 host_aur_packages:
-  - google-chrome
-  - opencode-bin
   - zfs-linux

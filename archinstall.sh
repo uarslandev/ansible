@@ -330,13 +330,21 @@ if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
         chown -R $USERNAME:$USERNAME /home/$USERNAME
         cd /home/$USERNAME/ansible
         PLAYBOOK='$CUSTOM_PLAYBOOK'
-        if [[ -z \"\$PLAYBOOK\" ]]; then
-            for f in \"$HOSTNAME.yml\" local.yml site.yml main.yml workstation.yml; do
-                [[ -f \"\$f\" ]] && { PLAYBOOK=\"\$f\"; break; }
-            done
+        if [[ -z \"\$PLAYBOOK\" && -f \"$HOSTNAME.yml\" ]]; then
+            PLAYBOOK=\"$HOSTNAME.yml\"
         fi
         if [[ -n \"\$PLAYBOOK\" ]]; then
             su - $USERNAME -c \"cd ~/ansible && ansible-playbook -i inventory.ini \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
+        elif [[ -f workstation.yml ]]; then
+            # No <hostname>.yml playbook for this host: fall back to the shared
+            # workstation config so the common packages still get installed.
+            # A temporary inventory targets the freshly installed host and lets
+            # Ansible load group_vars/workstations.yml and host_vars/<hostname>.yml.
+            cat > /tmp/ansible-inventory.ini <<EOF
+[workstations]
+$HOSTNAME ansible_connection=local
+EOF
+            su - $USERNAME -c \"cd ~/ansible && ansible-playbook -i /tmp/ansible-inventory.ini workstation.yml -e 'target_hosts=$HOSTNAME' --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
         else
             echo 'No valid playbook found. Skipping.'
         fi

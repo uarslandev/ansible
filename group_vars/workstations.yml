@@ -15,7 +15,9 @@ system_packages:
   - curl
   - dkms
   - docker
+  - docker-compose
   - dolphin
+  - dosfstools
   - efibootmgr
   - fastfetch
   - fd
@@ -26,6 +28,7 @@ system_packages:
   - gwenview
   - helm
   - k9s
+  - kind
   - kubectl
   - starship
   - terraform
@@ -51,6 +54,7 @@ system_packages:
   - nextcloud-client
   - nodejs
   - npm
+  - openssh
   - plasma-meta
   - plasma-nm
   - plasma-pa
@@ -65,6 +69,7 @@ system_packages:
   - sudo
   - tmux
   - torbrowser-launcher
+  - ttf-firacode-nerd
   - unzip
   - wget
   - wireless-regdb
@@ -79,8 +84,9 @@ aur_packages:
   - antigravity-cli
   - catppuccin-cursors-mocha
   - catppuccin-gtk-theme-mocha
-  - kind
+  - google-chrome
   - oh-my-zsh-git
+  - opencode-bin
   - paru
   - tor-browser-alpha-bin
   - vesktop-bin

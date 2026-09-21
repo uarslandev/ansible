@@ -6,14 +6,14 @@ Audits and synchronizes Arch Linux packages (pacman repo & AUR via paru)
 with the Ansible group_vars/workstations.yml package manifest.
 
 Usage:
-  pkg-sync                          Display package drift between system and Ansible config
-  pkg-sync --check                  Check for package drift (exit code 1 if drift exists)
-  pkg-sync --apply                  Update group_vars/workstations.yml to match installed system packages
-  pkg-sync --interactive            Interactively approve/reject package additions and removals
-  pkg-sync --add <pkg>              Add a package to workstations.yml (auto-detects pacman vs AUR)
-  pkg-sync --remove <pkg>           Remove a package from workstations.yml
-  pkg-sync --host <hostname>        Include and update host_vars/<hostname>.yml
-  pkg-sync --config <path>          Path to the shared workstation config
+  pkgSync                          Display package drift between system and Ansible config
+  pkgSync --check                  Check for package drift (exit code 1 if drift exists)
+  pkgSync --apply                  Update group_vars/workstations.yml to match installed system packages
+  pkgSync --interactive            Interactively approve/reject package additions and removals
+  pkgSync --add <pkg>              Add a package to workstations.yml (auto-detects pacman vs AUR)
+  pkgSync --remove <pkg>           Remove a package from workstations.yml
+  pkgSync --host <hostname>        Include and update host_vars/<hostname>.yml
+  pkgSync --config <path>          Path to the shared workstation config
 """
 
 import sys
@@ -161,16 +161,18 @@ def get_installed_packages():
     cmd_bin = get_working_pkg_cmd()
 
     try:
-        native = set(subprocess.check_output([cmd_bin, "-Qnq"], text=True).splitlines())
+        # -Qqe lists explicitly installed packages (native and AUR), excluding pure dependencies
+        native_explicit = set(subprocess.check_output([cmd_bin, "-Qqe"], text=True).splitlines())
     except Exception:
-        native = set()
+        native_explicit = set()
 
     try:
+        # -Qmq lists all foreign (AUR) packages
         aur = set(subprocess.check_output([cmd_bin, "-Qmq"], text=True).splitlines())
     except Exception:
         aur = set()
 
-    return native, aur
+    return native_explicit - aur, aur
 
 
 def is_aur_package(pkg):
@@ -231,8 +233,7 @@ def main():
     parser.add_argument("--config", "-c", help="Path to group_vars/workstations.yml")
     parser.add_argument(
         "--host",
-        help="Hostname whose host_vars package file should be included and updated "
-        "(defaults to the current host when its manifest exists)",
+        help="Hostname whose host_vars package file should be updated instead of the shared config",
     )
     parser.add_argument("--check", action="store_true", help="Check for drift without modifying config")
     parser.add_argument("--apply", "-a", action="store_true", help="Automatically update workstations.yml to match system")
@@ -242,20 +243,27 @@ def main():
 
     args = parser.parse_args()
     shared_path = find_config_path(args.config)
-    shared_config = None
-    config_path = shared_path
-    host_path = find_host_config_path(shared_path, args.host)
-    if host_path:
-        shared_config = load_config(shared_path)
-        config_path = host_path
+    shared_config = load_config(shared_path)
 
-    data = load_config(shared_path, config_path if shared_config is not None else None)
+    # Changes are written to the shared manifest by default; only an explicit
+    # --host routes them to that host's host_vars file instead.
+    host_path = None
+    display_host = None
+    if args.host:
+        host_path = find_host_config_path(shared_path, args.host)
+    else:
+        # Audit/display still merges the current host's manifest (read-only).
+        display_host = find_host_config_path(shared_path, None)
+
+    config_path = host_path if args.host else shared_path
+    data = load_config(shared_path, host_path if args.host else display_host)
+    write_data = load_config(shared_path, host_path) if args.host else shared_config
 
     if args.add:
-        cmd_add(args, config_path, data, shared_config)
+        cmd_add(args, config_path, write_data, shared_config if args.host else None)
         return
     if args.remove:
-        cmd_remove(args, config_path, data, shared_config)
+        cmd_remove(args, config_path, write_data, shared_config if args.host else None)
         return
 
     cfg_system = set(data.get("system_packages", []))
@@ -279,11 +287,12 @@ def main():
 
     # Print summary
     print(f"{CYAN}{BOLD}=== Ansible Package Synchronization Audit ==={RESET}")
-    if shared_config is not None:
-        print(f"Shared Config: {BOLD}{shared_path}{RESET}")
-        print(f"Host Config:   {BOLD}{config_path}{RESET}\n")
-    else:
-        print(f"Config File: {BOLD}{config_path}{RESET}\n")
+    print(f"Shared Config: {BOLD}{shared_path}{RESET}")
+    if host_path:
+        print(f"Host Config:   {BOLD}{host_path}{RESET}")
+    elif display_host:
+        print(f"Host Config:   {BOLD}{display_host} (read-only){RESET}")
+    print(f"Write Target:  {BOLD}{config_path}{RESET}\n")
 
     has_drift = False
 
@@ -306,6 +315,7 @@ def main():
     # Check for newly installed native packages that might be worth tracking
     new_native = installed_native - cfg_system
     if new_native:
+        has_drift = True
         print(f"{YELLOW}{BOLD}[Explicitly Installed Pacman Packages not in Ansible config: {len(new_native)}]{RESET}")
         # Display first 15 as sample if many
         sample = sorted(list(new_native))
@@ -315,7 +325,7 @@ def main():
             print(f"  {YELLOW}... and {len(sample) - 15} more packages{RESET}")
         print()
 
-    if not has_drift and not new_native:
+    if not has_drift:
         print(f"{GREEN}{BOLD}✓ Ansible package configuration is in perfect sync with your system!{RESET}")
         sys.exit(0)
 
@@ -327,50 +337,78 @@ def main():
 
     if args.apply:
         print(f"{CYAN}Updating {config_path.name}...{RESET}")
-        # Remove uninstalled packages from config
-        data["system_packages"] = sorted(list(cfg_system - uninstalled_system))
-        data["aur_packages"] = sorted(list((cfg_aur - uninstalled_aur) | new_aur))
-        save_config(config_path, data, shared_config)
+        # Remove uninstalled packages from the write target and add newly installed packages
+        if args.host:
+            data["system_packages"] = sorted(list((cfg_system - uninstalled_system) | new_native))
+            data["aur_packages"] = sorted(list((cfg_aur - uninstalled_aur) | new_aur))
+            save_config(config_path, data, shared_config)
+        else:
+            shared_data = load_config(shared_path)
+            shared_data["system_packages"] = sorted(list((set(shared_data["system_packages"]) - uninstalled_system) | new_native))
+            shared_data["aur_packages"] = sorted(list((set(shared_data["aur_packages"]) - uninstalled_aur) | new_aur))
+            save_config(config_path, shared_data)
         print(f"{GREEN}✓ Successfully updated {config_path.name}!{RESET}")
         if uninstalled_system or uninstalled_aur:
             print(f"  - Removed {len(uninstalled_system) + len(uninstalled_aur)} uninstalled packages.")
+        if new_native:
+            print(f"  + Added {len(new_native)} new system packages.")
         if new_aur:
             print(f"  + Added {len(new_aur)} new AUR packages.")
         return
 
     if args.interactive:
         modified = False
+        to_remove_system = set()
+        to_remove_aur = set()
+        to_add_system = set()
+        to_add_aur = set()
+
         if uninstalled_system or uninstalled_aur:
             print(f"{BOLD}Review uninstalled packages to REMOVE from Ansible config:{RESET}")
             for pkg in sorted(uninstalled_system):
-                ans = input(f"Remove pacman package '{pkg}' from workstations.yml? [y/N]: ").strip().lower()
+                ans = input(f"Remove pacman package '{pkg}' from config? [y/N]: ").strip().lower()
                 if ans == 'y':
-                    data["system_packages"].remove(pkg)
+                    to_remove_system.add(pkg)
                     modified = True
             for pkg in sorted(uninstalled_aur):
-                ans = input(f"Remove AUR package '{pkg}' from workstations.yml? [y/N]: ").strip().lower()
+                ans = input(f"Remove AUR package '{pkg}' from config? [y/N]: ").strip().lower()
                 if ans == 'y':
-                    data["aur_packages"].remove(pkg)
+                    to_remove_aur.add(pkg)
                     modified = True
 
         if new_aur:
             print(f"\n{BOLD}Review new AUR packages to ADD to Ansible config:{RESET}")
             for pkg in sorted(new_aur):
-                ans = input(f"Add AUR package '{pkg}' to workstations.yml? [Y/n]: ").strip().lower()
+                ans = input(f"Add AUR package '{pkg}' to config? [Y/n]: ").strip().lower()
                 if ans != 'n':
-                    if pkg not in data["aur_packages"]:
-                        data["aur_packages"].append(pkg)
-                        modified = True
+                    to_add_aur.add(pkg)
+                    modified = True
+
+        if new_native:
+            print(f"\n{BOLD}Review new system packages to ADD to Ansible config:{RESET}")
+            for pkg in sorted(new_native):
+                ans = input(f"Add system package '{pkg}' to config? [y/N]: ").strip().lower()
+                if ans == 'y':
+                    to_add_system.add(pkg)
+                    modified = True
 
         if modified:
-            save_config(config_path, data, shared_config)
+            if args.host:
+                data["system_packages"] = sorted(list((set(data["system_packages"]) - to_remove_system) | to_add_system))
+                data["aur_packages"] = sorted(list((set(data["aur_packages"]) - to_remove_aur) | to_add_aur))
+                save_config(config_path, data, shared_config)
+            else:
+                shared_data = load_config(shared_path)
+                shared_data["system_packages"] = sorted(list((set(shared_data["system_packages"]) - to_remove_system) | to_add_system))
+                shared_data["aur_packages"] = sorted(list((set(shared_data["aur_packages"]) - to_remove_aur) | to_add_aur))
+                save_config(config_path, shared_data)
             print(f"{GREEN}✓ Saved interactive changes to {config_path.name}{RESET}")
         else:
             print("No changes saved.")
         return
 
-    print(f"To synchronize automatically, run: {BOLD}pkg-sync --apply{RESET}")
-    print(f"To synchronize interactively, run: {BOLD}pkg-sync --interactive{RESET}")
+    print(f"To synchronize automatically, run: {BOLD}pkgSync --apply{RESET}")
+    print(f"To synchronize interactively, run: {BOLD}pkgSync --interactive{RESET}")
 
 
 if __name__ == "__main__":
