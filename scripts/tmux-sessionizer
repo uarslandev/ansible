@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+# Tmux sessionizer: fuzzy select a directory from .config, Repos, and Projects
+# (including hidden and non-hidden directories) and switch to or create a tmux session for it.
+
+if [[ $# -eq 1 ]]; then
+    selected="$1"
+else
+    search_dirs=()
+    for dir in "$HOME/.config" "$HOME/Repos" "$HOME/Projects"; do
+        if [[ -d "$dir" ]]; then
+            search_dirs+=("$dir")
+        fi
+    done
+
+    # List .config itself (if present) and all depth-1 directories (hidden and non-hidden)
+    # inside .config, Repos, and Projects
+    selected=$( {
+        [[ -d "$HOME/.config" ]] && echo "$HOME/.config"
+        if [[ ${#search_dirs[@]} -gt 0 ]]; then
+            find "${search_dirs[@]}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+        fi
+    } | fzf )
+fi
+
+if [[ -z "$selected" ]]; then
+    exit 0
+fi
+
+# Sanitize session name: strip leading dot, replace dots and colons with underscores
+selected_name=$(basename "$selected" | sed 's/^\.//' | tr '.:' '_')
+
+tmux_running=$(pgrep tmux)
+
+if [[ -z "$TMUX" ]] && [[ -z "$tmux_running" ]]; then
+    tmux new-session -s "$selected_name" -c "$selected"
+    exit 0
+fi
+
+if ! tmux has-session -t="$selected_name" 2>/dev/null; then
+    tmux new-session -ds "$selected_name" -c "$selected"
+fi
+
+if [[ -z "$TMUX" ]]; then
+    tmux attach-session -t "$selected_name"
+else
+    tmux switch-client -t "$selected_name"
+fi

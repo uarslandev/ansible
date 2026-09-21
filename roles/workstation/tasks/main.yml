@@ -187,6 +187,12 @@
     dest: "{{ user_bin }}/pkg-sync"
     mode: '0755'
 
+- name: Deploy tmux-sessionizer utility script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/tmux-sessionizer"
+    dest: "{{ user_bin }}/tmux-sessionizer"
+    mode: '0755'
+
 - name: Disable conflicting display managers
   become: true
   ansible.builtin.systemd_service:
