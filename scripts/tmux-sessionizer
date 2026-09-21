@@ -33,16 +33,19 @@ selected_name=$(basename "$selected" | sed 's/^\.//' | tr '.:' '_')
 tmux_running=$(pgrep tmux)
 
 if [[ -z "$TMUX" ]] && [[ -z "$tmux_running" ]]; then
-    tmux new-session -s "$selected_name" -c "$selected"
+    tmux new-session -s "$selected_name" -c "$selected" -e "TMUX_SESSION_PATH=$selected"
+    tmux set-environment -t "$selected_name" TMUX_SESSION_PATH "$selected" 2>/dev/null
     exit 0
 fi
 
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
-    tmux new-session -ds "$selected_name" -c "$selected"
+    tmux new-session -ds "$selected_name" -c "$selected" -e "TMUX_SESSION_PATH=$selected"
 fi
 
+tmux set-environment -t "$selected_name" TMUX_SESSION_PATH "$selected" 2>/dev/null
+
 if [[ -z "$TMUX" ]]; then
-    tmux attach-session -t "$selected_name"
+    tmux attach-session -t "$selected_name" -c "$selected"
 else
     tmux switch-client -t "$selected_name"
 fi
