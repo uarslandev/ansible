@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Dotfiles & System Automation Bootstrap CLI
+# Compatible with Arch Linux, WSL, Fedora VM, Ubuntu, and Debian
+# Can be run directly via curl or cloned locally:
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/uarslandev/ansible/main/bin/dotfiles)"
+# ==============================================================================
+set -euo pipefail
+
+# ANSI Colors
+NC='\033[0m'
+BOLD='\033[1m'
+GREEN='\033[38;2;166;227;161m'
+TEAL='\033[38;2;148;226;213m'
+BLUE='\033[38;2;137;180;250m'
+YELLOW='\033[38;2;249;226;175m'
+RED='\033[38;2;243;139;168m'
+MAUVE='\033[38;2;203;166;247m'
+
+DEFAULT_REPO_URL="https://github.com/uarslandev/ansible.git"
+REPO_URL="${DOTFILES_REPO_URL:-$DEFAULT_REPO_URL}"
+TARGET_DIR="${DOTFILES_DIR:-$HOME/.dotfiles}"
+
+# Detect if executed from within an existing local checkout (following symlinks)
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    RESOLVED_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+    DETECTED_DIR="$(cd "$(dirname "$RESOLVED_SOURCE")/.." && pwd)"
+    if [ -f "$DETECTED_DIR/main.yml" ]; then
+        TARGET_DIR="$DETECTED_DIR"
+    fi
+fi
+
+log_step() {
+    printf "${BLUE}${BOLD}[*]${NC} %s\n" "$1"
+}
+
+log_success() {
+    printf "${GREEN}${BOLD}[✓]${NC} %s\n" "$1"
+}
+
+log_warn() {
+    printf "${YELLOW}${BOLD}[!]${NC} %s\n" "$1"
+}
+
+log_error() {
+    printf "${RED}${BOLD}[✗]${NC} %s\n" "$1"
+}
+
+print_banner() {
+    echo -e "${MAUVE}${BOLD}"
+    cat << "EOF"
+  ____       _    __ _ _           
+ |  _ \  ___| |_ / _(_) | ___  ___ 
+ | | | |/ _ \ __| |_| | |/ _ \/ __|
+ | |_| | (_) | |_|  _| | |  __/\__ \
+ |____/ \___/ \__|_| |_|_|\___||___/
+ Automated Multi-OS Infrastructure & Dotfiles
+EOF
+    echo -e "${NC}"
+}
+
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        # shellcheck source=/dev/null
+        source /etc/os-release
+        local id_lower
+        id_lower=$(printf '%s' "${ID:-}" | tr '[:upper:]' '[:lower:]')
+        local id_like_lower
+        id_like_lower=$(printf '%s' "${ID_LIKE:-}" | tr '[:upper:]' '[:lower:]')
+
+        case "$id_lower" in
+            arch|archlinux|cachyos|endeavouros|manjaro)
+                echo "arch"
+                return
+                ;;
+            ubuntu|debian|pop|mint)
+                echo "ubuntu"
+                return
+                ;;
+            fedora|rhel|centos|rocky|almalinux)
+                echo "fedora"
+                return
+                ;;
+        esac
+
+        if [[ " $id_like_lower " =~ \ arch\  ]]; then
+            echo "arch"
+            return
+        elif [[ " $id_like_lower " =~ \ debian\  || " $id_like_lower " =~ \ ubuntu\  ]]; then
+            echo "ubuntu"
+            return
+        elif [[ " $id_like_lower " =~ \ fedora\  || " $id_like_lower " =~ \ rhel\  ]]; then
+            echo "fedora"
+            return
+        fi
+
+        echo "$id_lower"
+    else
+        uname -s | tr '[:upper:]' '[:lower:]'
+    fi
+}
+
+detect_wsl() {
+    if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -e /proc/sys/fs/binfmt_misc/WSLInterop ] || grep -qi "microsoft" /proc/version 2>/dev/null; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+bootstrap_arch() {
+    log_step "Bootstrapping Arch Linux prerequisites..."
+    local pkgs=()
+    command -v ansible >/dev/null 2>&1 || pkgs+=(ansible)
+    command -v git >/dev/null 2>&1 || pkgs+=(git)
+    command -v python3 >/dev/null 2>&1 || pkgs+=(python)
+    command -v chezmoi >/dev/null 2>&1 || pkgs+=(chezmoi)
+
+    if [ ${#pkgs[@]} -gt 0 ]; then
+        log_step "Installing ${pkgs[*]} via pacman..."
+        sudo pacman -S --needed --noconfirm "${pkgs[@]}"
+    fi
+    log_success "Arch Linux prerequisites ready."
+}
+
+bootstrap_ubuntu() {
+    log_step "Bootstrapping Ubuntu/Debian prerequisites..."
+    local need_install=false
+    command -v ansible >/dev/null 2>&1 || need_install=true
+    command -v git >/dev/null 2>&1 || need_install=true
+    command -v python3 >/dev/null 2>&1 || need_install=true
+    command -v curl >/dev/null 2>&1 || need_install=true
+
+    if [ "$need_install" = true ]; then
+        sudo apt-get update -y
+        sudo apt-get install -y software-properties-common curl git python3 python3-pip python3-venv
+        if ! command -v ansible >/dev/null 2>&1; then
+            sudo apt-add-repository -y ppa:ansible/ansible 2>/dev/null || true
+            sudo apt-get update -y
+            sudo apt-get install -y ansible
+        fi
+    fi
+    log_success "Ubuntu/Debian prerequisites ready."
+}
+
+bootstrap_fedora() {
+    log_step "Bootstrapping Fedora prerequisites..."
+    local pkgs=()
+    command -v ansible >/dev/null 2>&1 || pkgs+=(ansible)
+    command -v git >/dev/null 2>&1 || pkgs+=(git)
+    command -v python3 >/dev/null 2>&1 || pkgs+=(python3)
+    command -v chezmoi >/dev/null 2>&1 || pkgs+=(chezmoi)
+
+    if [ ${#pkgs[@]} -gt 0 ]; then
+        log_step "Installing ${pkgs[*]} via dnf..."
+        sudo dnf install -y "${pkgs[@]}"
+    fi
+    log_success "Fedora prerequisites ready."
+}
+
+sync_repo() {
+    if [ ! -d "$TARGET_DIR/.git" ]; then
+        log_step "Cloning repository from ${REPO_URL} into ${TARGET_DIR}..."
+        git clone --quiet "$REPO_URL" "$TARGET_DIR"
+        log_success "Repository cloned successfully."
+    else
+        log_step "Repository located at ${TARGET_DIR}."
+        if [ -d "$TARGET_DIR/.git" ]; then
+            git -C "$TARGET_DIR" pull --quiet || true
+        fi
+    fi
+}
+
+install_galaxy_requirements() {
+    local req_file="$TARGET_DIR/requirements/common.yml"
+    if [ -f "$req_file" ]; then
+        log_step "Checking Ansible Galaxy requirements..."
+        ansible-galaxy collection install -r "$req_file" --upgrade >/dev/null 2>&1 || true
+        log_success "Ansible Galaxy collections ready."
+    fi
+}
+
+link_cli() {
+    mkdir -p "$HOME/.local/bin"
+    if [ -f "$TARGET_DIR/bin/dotfiles" ]; then
+        ln -sf "$TARGET_DIR/bin/dotfiles" "$HOME/.local/bin/dotfiles"
+    fi
+}
+
+main() {
+    print_banner
+
+    local detected_os
+    detected_os=$(detect_os)
+    local is_wsl
+    is_wsl=$(detect_wsl)
+
+    log_step "Detected OS: ${BOLD}${detected_os}${NC} (WSL: ${BOLD}${is_wsl}${NC})"
+
+    case "$detected_os" in
+        arch)
+            bootstrap_arch
+            ;;
+        ubuntu)
+            bootstrap_ubuntu
+            ;;
+        fedora)
+            bootstrap_fedora
+            ;;
+        *)
+            log_warn "Unknown or unsupported OS '$detected_os'. Proceeding if ansible is already installed..."
+            if ! command -v ansible-playbook >/dev/null 2>&1; then
+                log_error "ansible-playbook is not installed. Please install Ansible first."
+                exit 1
+            fi
+            ;;
+    esac
+
+    sync_repo
+    install_galaxy_requirements
+    link_cli
+
+    log_step "Executing Ansible playbook main.yml..."
+    cd "$TARGET_DIR"
+    ansible-playbook main.yml "$@"
+
+    log_success "All tasks completed! Your environment and dotfiles are now up to date."
+    log_step "You can run ${BOLD}dotfiles${NC} anytime to keep your setup synchronized."
+}
+
+main "$@"

@@ -1,0 +1,45 @@
+---
+- name: Check for desktop environment indicators
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /usr/bin/sway
+    - /usr/bin/startplasma-wayland
+    - /usr/bin/startx
+    - /usr/bin/Xorg
+    - /usr/bin/wayland-scanner
+    - /usr/bin/ly
+  register: desktop_indicators
+  check_mode: false
+  tags:
+    - always
+
+- name: Determine session type fact
+  ansible.builtin.set_fact:
+    is_desktop_system: >-
+      {{ (desktop_indicators.results | selectattr('stat.exists') | list | length > 0)
+         or (ansible_facts['env']['DISPLAY'] is defined)
+         or (ansible_facts['env']['WAYLAND_DISPLAY'] is defined) }}
+  tags:
+    - always
+
+- name: Register session fact
+  ansible.builtin.set_fact:
+    dotfiles_session: >-
+      {%- if dotfiles_session is defined -%}
+      {{ dotfiles_session }}
+      {%- elif ansible_host_environment_is_wsl -%}
+      wsl
+      {%- elif is_desktop_system -%}
+      desktop
+      {%- else -%}
+      headless
+      {%- endif -%}
+  tags:
+    - always
+
+- name: Show session and environment
+  ansible.builtin.debug:
+    msg: "Session environment determined: {{ dotfiles_session }} (WSL: {{ ansible_host_environment_is_wsl }}, Desktop: {{ is_desktop_system }})"
+  tags:
+    - always

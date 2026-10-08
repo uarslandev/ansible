@@ -1,9 +1,89 @@
 ---
-# Shared variables across all hosts (Workstations and Servers)
-target_user: "{{ ansible_user_id if (ansible_user_id is defined and ansible_user_id != 'root') else (ansible_env.SUDO_USER | default(ansible_env.LOGNAME | default('user'))) }}"
+# ==============================================================================
+# Shared Global Variables (All hosts & environments)
+# ==============================================================================
+
+target_user: "{{ (ansible_facts['user_id'] | default(ansible_user_id | default('user'))) if ((ansible_facts['user_id'] | default(ansible_user_id | default('user'))) != 'root') else (ansible_facts['env']['SUDO_USER'] | default(ansible_env.SUDO_USER | default(ansible_facts['env']['LOGNAME'] | default(ansible_env.LOGNAME | default('user'))))) }}"
 user_home: "/home/{{ target_user }}"
 user_bin: "{{ user_home }}/.local/bin"
 
-
-# Chezmoi Dotfiles Repository URL
+# Chezmoi Dotfiles Repository URL (managed across all environments)
 dotfiles_repo: "https://github.com/uarslandev/dotfiles.git"
+
+# Default role pipeline executed in order
+default_roles:
+  - common
+  - workstation
+  - devops_tools
+  - dotfiles
+
+# Dynamic role pruning by session (desktop vs wsl vs headless/server)
+exclude_roles_by_session:
+  wsl: []
+  headless: []
+  server:
+    - workstation
+
+# Dynamic role pruning by distribution
+exclude_roles_by_distribution:
+  Archlinux: []
+  Ubuntu: []
+  Fedora: []
+
+# ------------------------------------------------------------------------------
+# Ubuntu / Debian Workstation Packages (CLI & Development Stack)
+# ------------------------------------------------------------------------------
+ubuntu_system_packages:
+  - build-essential
+  - curl
+  - wget
+  - git
+  - tmux
+  - zsh
+  - neovim
+  - ripgrep
+  - fzf
+  - fd-find
+  - jq
+  - btop
+  - htop
+  - python3
+  - python3-pip
+  - python3-venv
+  - nodejs
+  - npm
+  - unzip
+  - openssh-client
+  - ca-certificates
+
+# ------------------------------------------------------------------------------
+# Fedora Workstation Packages (CLI & Development Stack)
+# ------------------------------------------------------------------------------
+fedora_system_packages:
+  - make
+  - automake
+  - gcc
+  - gcc-c++
+  - kernel-devel
+  - curl
+  - wget
+  - git
+  - gh
+  - tmux
+  - zsh
+  - neovim
+  - ripgrep
+  - fzf
+  - fd-find
+  - jq
+  - btop
+  - htop
+  - python3
+  - python3-pip
+  - nodejs
+  - npm
+  - unzip
+  - openssh-clients
+  - chezmoi
+  - starship
+  - fastfetch

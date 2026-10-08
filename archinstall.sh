@@ -330,11 +330,13 @@ if [[ "$RUN_ANSIBLE" =~ ^(y|yes)$ ]]; then
         chown -R $USERNAME:$USERNAME /home/$USERNAME
         cd /home/$USERNAME/ansible
         PLAYBOOK='$CUSTOM_PLAYBOOK'
-        if [[ -z \"\$PLAYBOOK\" && -f \"$HOSTNAME.yml\" ]]; then
-            PLAYBOOK=\"$HOSTNAME.yml\"
+        if [[ -z "$PLAYBOOK" && -f "$HOSTNAME.yml" ]]; then
+            PLAYBOOK="$HOSTNAME.yml"
+        elif [[ -z "$PLAYBOOK" && -f "main.yml" ]]; then
+            PLAYBOOK="main.yml"
         fi
-        if [[ -n \"\$PLAYBOOK\" ]]; then
-            su - $USERNAME -c \"cd ~/ansible && ansible-playbook -i inventory.ini \$PLAYBOOK --connection=local -e 'ansible_become_pass=\\\"\\\"'\"
+        if [[ -n "$PLAYBOOK" ]]; then
+            su - $USERNAME -c "cd ~/ansible && ansible-playbook -i inventory.ini $PLAYBOOK --connection=local -e 'ansible_become_pass=\"\"'"
         elif [[ -f workstation.yml ]]; then
             # No <hostname>.yml playbook for this host: fall back to the shared
             # workstation config so the common packages still get installed.

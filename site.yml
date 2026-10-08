@@ -3,8 +3,8 @@
 # Master Infrastructure Playbook
 # ==============================================================================
 
-# 1. Developer Workstation Setup (runs on every workstation)
-- import_playbook: workstation.yml
+# 1. Developer Workstation & Dotfiles Setup (runs across Arch, WSL, Fedora, Ubuntu)
+- import_playbook: main.yml
 
 # 2. Server Node Setup (Placeholder for future Home Server / VPS nodes)
 - name: Provision Server Nodes

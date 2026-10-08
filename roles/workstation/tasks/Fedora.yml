@@ -1,0 +1,13 @@
+---
+# ==============================================================================
+# Fedora & RHEL Workstation Tasks (dnf)
+# ==============================================================================
+
+- name: Fedora | Install core workstation CLI packages
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ fedora_system_packages }}"
+    state: present
+  when:
+    - can_install_packages
+    - fedora_system_packages is defined

@@ -1,0 +1,48 @@
+---
+# ==============================================================================
+# DevOps Tools Installation - Fedora
+# ==============================================================================
+
+- name: DevOps | Check if kubectl is installed
+  ansible.builtin.command: which kubectl
+  register: kubectl_check
+  changed_when: false
+  failed_when: false
+
+- name: DevOps | Install kubectl binary if missing
+  ansible.builtin.get_url:
+    url: "https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl"
+    dest: "{{ user_bin }}/kubectl"
+    mode: '0755'
+    owner: "{{ target_user }}"
+  when: kubectl_check.rc != 0
+  failed_when: false
+
+- name: DevOps | Check if helm is installed
+  ansible.builtin.command: which helm
+  register: helm_check
+  changed_when: false
+  failed_when: false
+
+- name: DevOps | Install helm binary if missing
+  ansible.builtin.shell: |
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | USE_SUDO=false BINDIR="{{ user_bin }}" bash
+  args:
+    creates: "{{ user_bin }}/helm"
+  when: helm_check.rc != 0
+  failed_when: false
+
+- name: DevOps | Check if kind is installed
+  ansible.builtin.command: which kind
+  register: kind_check
+  changed_when: false
+  failed_when: false
+
+- name: DevOps | Install kind binary if missing
+  ansible.builtin.get_url:
+    url: "https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64"
+    dest: "{{ user_bin }}/kind"
+    mode: '0755'
+    owner: "{{ target_user }}"
+  when: kind_check.rc != 0
+  failed_when: false

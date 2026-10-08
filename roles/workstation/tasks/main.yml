@@ -1,242 +1,99 @@
+---
 # ==============================================================================
-# Automatic package pruning (auto-uninstall when removed from system_packages)
+# Workstation Role - Multi-Distribution Entrypoint
 # ==============================================================================
 
-- name: Combine shared and host-specific pacman packages
-  ansible.builtin.set_fact:
-    managed_system_packages: "{{ (system_packages + (host_system_packages | default([]))) | unique }}"
-
-- name: Combine shared and host-specific AUR packages
-  ansible.builtin.set_fact:
-    managed_aur_packages: "{{ (aur_packages + (host_aur_packages | default([]))) | unique }}"
-
-- name: Check for previously managed pacman package manifest
+- name: Workstation | Check for distribution task file
   ansible.builtin.stat:
-    path: /var/lib/ansible_managed_pacman_packages.json
-  register: pacman_manifest_stat
+    path: "{{ role_path }}/tasks/{{ ansible_facts['distribution'] }}.yml"
+  register: distro_task_stat
 
-- name: Read previous pacman package manifest
-  ansible.builtin.slurp:
-    src: /var/lib/ansible_managed_pacman_packages.json
-  register: previous_pacman_manifest_raw
-  when: pacman_manifest_stat.stat.exists
+- name: Workstation | Execute distribution-specific tasks
+  ansible.builtin.include_tasks: "{{ ansible_facts['distribution'] }}.yml"
+  when: distro_task_stat.stat.exists
 
-- name: Set previous pacman package list
-  ansible.builtin.set_fact:
-    previous_pacman_packages: "{{ (previous_pacman_manifest_raw.content | b64decode | from_json) if pacman_manifest_stat.stat.exists else [] }}"
+- name: Workstation | Inform if distribution task file is missing
+  ansible.builtin.debug:
+    msg: "No distribution-specific tasks for '{{ ansible_facts['distribution'] }}'. Skipping OS package tasks."
+  when: not distro_task_stat.stat.exists
 
-- name: Calculate packages to auto-remove
-  ansible.builtin.set_fact:
-    packages_to_remove: "{{ (previous_pacman_packages | difference(managed_system_packages)) | difference(['tar', 'util-linux', 'wpa_supplicant', 'zfs-utils', 'base', 'base-devel', 'linux', 'systemd']) }}"
-
-- name: Auto-remove packages no longer listed in system_packages
-  become: true
-  ansible.builtin.pacman:
-    name: "{{ packages_to_remove }}"
-    state: absent
-  when: packages_to_remove | length > 0
-
-- name: Install current Arch packages
-  become: true
-  ansible.builtin.pacman:
-    name: "{{ managed_system_packages }}"
-    state: present
-    update_cache: true
-
-- name: Save updated pacman package manifest
-  become: true
-  ansible.builtin.copy:
-    content: "{{ managed_system_packages | to_nice_json }}"
-    dest: /var/lib/ansible_managed_pacman_packages.json
-    mode: '0644'
-
-- name: Ensure target user has passwordless sudo for pacman (required for paru)
-  become: true
-  ansible.builtin.copy:
-    content: "{{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
-    dest: /etc/sudoers.d/99-ansible-aur-pacman
-    mode: '0440'
-    validate: 'visudo -cf %s'
-
-- name: Ensure base-devel and git are installed (required for building AUR packages)
-  become: true
-  ansible.builtin.pacman:
-    name:
-      - base-devel
-      - git
-    state: present
-
-- name: Check whether paru binary is functional
-  ansible.builtin.command:
-    cmd: paru --version
-  register: paru_check
-  failed_when: false
-  changed_when: false
-
-# ==============================================================================
-# Refactored Native Ansible Paru Compilation & Installation
-# ==============================================================================
-
-- name: Create temporary build directory for paru
-  ansible.builtin.file:
-    path: /tmp/paru-build
-    state: directory
-    owner: "{{ target_user }}"
-    mode: '0755'
-  when: paru_check.rc != 0
-
-- name: Clone paru repository from AUR
-  become: true
-  become_user: "{{ target_user }}"
-  ansible.builtin.git:
-    repo: https://aur.archlinux.org/paru.git
-    dest: /tmp/paru-build
-    update: true
-  when: paru_check.rc != 0
-
-- name: Clean previous build artifacts to force a fresh build
-  become: true
-  become_user: "{{ target_user }}"
-  ansible.builtin.command:
-    cmd: rm -rf /tmp/paru-build/*.pkg.tar* /tmp/paru-build/pkg /tmp/paru-build/src/paru-*
-    chdir: /tmp/paru-build
-  when: paru_check.rc != 0
-  failed_when: false
-
-- name: Build paru package only (without installing via makepkg)
-  become: true
-  become_user: "{{ target_user }}"
-  ansible.builtin.command:
-    cmd: makepkg -sf --noconfirm --skippgpcheck
-    chdir: /tmp/paru-build
-  when: paru_check.rc != 0
-
-- name: Force install the built paru packages using pacman directly
-  become: true
-  ansible.builtin.shell: |
-    pacman -U --noconfirm --overwrite '*' /tmp/paru-build/*.pkg.tar.zst
-  when: paru_check.rc != 0
-
-- name: Clean up temporary paru build directory
-  ansible.builtin.file:
-    path: /tmp/paru-build
-    state: absent
-  when: paru_check.rc != 0
-
-# ==============================================================================
-# AUR Package Management & Manifest Handling
-# ==============================================================================
-
-- name: Verify paru binary is functional after install
-  ansible.builtin.command:
-    cmd: paru --version
-  register: paru_binary_stat
-  failed_when: false
-  changed_when: false
-
-- name: Check for previously managed AUR package manifest
-  ansible.builtin.stat:
-    path: /var/lib/ansible_managed_aur_packages.json
-  register: aur_manifest_stat
-
-- name: Read previous AUR package manifest
-  ansible.builtin.slurp:
-    src: /var/lib/ansible_managed_aur_packages.json
-  register: previous_aur_manifest_raw
-  when: aur_manifest_stat.stat.exists
-
-- name: Set previous AUR package list
-  ansible.builtin.set_fact:
-    previous_aur_packages: "{{ (previous_aur_manifest_raw.content | b64decode | from_json) if aur_manifest_stat.stat.exists else [] }}"
-
-- name: Calculate AUR packages to auto-remove
-  ansible.builtin.set_fact:
-    aur_packages_to_remove: "{{ previous_aur_packages | difference(managed_aur_packages) }}"
-
-- name: Auto-remove AUR packages no longer listed in aur_packages
-  become: true
-  become_user: "{{ target_user }}"
-  ansible.builtin.command:
-    cmd: "paru -Rns --noconfirm {{ aur_packages_to_remove | join(' ') }}"
-  register: paru_remove_result
-  failed_when: paru_remove_result.rc != 0 and "target not found" not in (paru_remove_result.stderr | lower)
-  when:
-    - aur_packages_to_remove | length > 0
-    - paru_binary_stat.rc == 0
-
-- name: Install AUR packages with paru when available
-  become: true
-  become_user: "{{ target_user }}"
-  ansible.builtin.command:
-    cmd: "paru -S --noconfirm --needed {{ managed_aur_packages | join(' ') }}"
-  when:
-    - managed_aur_packages | length > 0
-    - paru_binary_stat.rc == 0
-
-- name: Save updated AUR package manifest
-  become: true
-  ansible.builtin.copy:
-    content: "{{ managed_aur_packages | to_nice_json }}"
-    dest: /var/lib/ansible_managed_aur_packages.json
-    mode: '0644'
-  when: paru_binary_stat.rc == 0
-
-- name: Deploy pkgSync utility script
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/scripts/pkgSync"
-    dest: "{{ user_bin }}/pkgSync"
-    mode: '0755'
+# ------------------------------------------------------------------------------
+# Utility Scripts Deployment (Cross-Platform)
+# ------------------------------------------------------------------------------
 
 - name: Deploy tmux-sessionizer utility script
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/scripts/tmux-sessionizer"
     dest: "{{ user_bin }}/tmux-sessionizer"
     mode: '0755'
-
-- name: Disable conflicting display managers
-  become: true
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    enabled: false
-  loop:
-    - sddm.service
-    - gdm.service
-    - lightdm.service
   failed_when: false
+
+- name: Deploy pkgSync utility script (Arch Linux)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/pkgSync"
+    dest: "{{ user_bin }}/pkgSync"
+    mode: '0755'
+  when: ansible_facts['distribution'] == 'Archlinux'
+  failed_when: false
+
+- name: Deploy dotfiles CLI runner
+  ansible.builtin.file:
+    src: "{{ playbook_dir }}/bin/dotfiles"
+    dest: "{{ user_bin }}/dotfiles"
+    state: link
+    force: true
+  failed_when: false
+
+# ------------------------------------------------------------------------------
+# Desktop & Display Manager Setup (Bare-metal Desktop only; skipped on WSL/VM)
+# ------------------------------------------------------------------------------
+
+- name: Desktop | Configure display manager and hardware services
   when:
-    - ansible_service_mgr == "systemd"
+    - not ansible_host_environment_is_wsl
+    - dotfiles_session == 'desktop'
+    - (ansible_facts['service_mgr'] | default(ansible_service_mgr | default(''))) == "systemd"
+    - can_become | default(false)
+  block:
+    - name: Disable conflicting display managers
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: false
+      loop:
+        - sddm.service
+        - gdm.service
+        - lightdm.service
+      failed_when: false
 
-- name: Check for ly systemd service file
-  ansible.builtin.stat:
-    path: /usr/lib/systemd/system/ly.service
-  register: ly_unit_stat
+    - name: Check for ly systemd service file
+      ansible.builtin.stat:
+        path: /usr/lib/systemd/system/ly.service
+      register: ly_unit_stat
 
-- name: Check for ly templated systemd service file
-  ansible.builtin.stat:
-    path: /usr/lib/systemd/system/ly@.service
-  register: ly_templated_unit_stat
+    - name: Check for ly templated systemd service file
+      ansible.builtin.stat:
+        path: /usr/lib/systemd/system/ly@.service
+      register: ly_templated_unit_stat
 
-- name: Enable ly display manager service
-  become: true
-  ansible.builtin.systemd_service:
-    name: "{{ 'ly.service' if ly_unit_stat.stat.exists else 'ly@tty1.service' }}"
-    enabled: true
-    state: "{{ 'started' if (ansible_facts['is_chroot'] is not defined or not ansible_facts['is_chroot']) else omit }}"
-  when:
-    - ansible_service_mgr == "systemd"
-    - ly_unit_stat.stat.exists or ly_templated_unit_stat.stat.exists
+    - name: Enable ly display manager service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ 'ly.service' if ly_unit_stat.stat.exists else 'ly@tty1.service' }}"
+        enabled: true
+        state: "{{ 'started' if (ansible_facts['is_chroot'] is not defined or not ansible_facts['is_chroot']) else omit }}"
+      when: ly_unit_stat.stat.exists or ly_templated_unit_stat.stat.exists
 
-- name: Combine shared and host-specific systemd services
-  ansible.builtin.set_fact:
-    managed_system_services: "{{ (system_services + (host_system_services | default([]))) | unique }}"
+    - name: Combine shared and host-specific systemd services
+      ansible.builtin.set_fact:
+        managed_system_services: "{{ ((system_services | default([])) + (host_system_services | default([]))) | unique }}"
 
-- name: Enable default systemd services
-  become: true
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    enabled: true
-    state: "{{ 'started' if (ansible_facts['is_chroot'] is not defined or not ansible_facts['is_chroot']) else omit }}"
-  loop: "{{ managed_system_services }}"
-  when:
-    - ansible_service_mgr == "systemd"
-    - managed_system_services | length > 0
+    - name: Enable default systemd services
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: "{{ 'started' if (ansible_facts['is_chroot'] is not defined or not ansible_facts['is_chroot']) else omit }}"
+      loop: "{{ managed_system_services | default([]) }}"
+      failed_when: false
+      when: (managed_system_services | default([])) | length > 0

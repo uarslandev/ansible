@@ -1,0 +1,28 @@
+---
+- name: Detect WSL Environment
+  ansible.builtin.shell: |
+    if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -e /proc/sys/fs/binfmt_misc/WSLInterop ] || grep -qi "microsoft" /proc/version 2>/dev/null; then
+      echo true
+    else
+      echo false
+    fi
+  register: wsl_detection_raw
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+  changed_when: false
+  check_mode: false
+  tags:
+    - always
+
+- name: Register WSL State fact
+  ansible.builtin.set_fact:
+    ansible_host_environment_is_wsl: "{{ (wsl_detection_raw.stdout | trim) | default('false') | bool }}"
+  tags:
+    - always
+
+- name: Show WSL Environment State
+  ansible.builtin.debug:
+    msg: "WSL Environment Detected: {{ ansible_host_environment_is_wsl }}"
+  tags:
+    - always

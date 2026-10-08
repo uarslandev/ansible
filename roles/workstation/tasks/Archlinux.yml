@@ -1,0 +1,206 @@
+---
+# ==============================================================================
+# Arch Linux Workstation Tasks (pacman & paru / AUR)
+# ==============================================================================
+
+- name: Archlinux | Determine base managed pacman packages
+  ansible.builtin.set_fact:
+    raw_managed_system_packages: "{{ (system_packages | default([]) + (host_system_packages | default([]))) | unique }}"
+    managed_aur_packages: "{{ (aur_packages | default([]) + (host_aur_packages | default([]))) | unique }}"
+
+- name: Archlinux | Filter hardware and desktop packages when on WSL or headless
+  ansible.builtin.set_fact:
+    managed_system_packages: >-
+      {%- if ansible_host_environment_is_wsl or dotfiles_session != 'desktop' -%}
+      {{ raw_managed_system_packages | difference(['amd-ucode', 'intel-ucode', 'linux', 'linux-firmware', 'linux-headers', 'broadcom-wl-dkms', 'dkms', 'sof-firmware', 'wireless-regdb', 'dosfstools', 'efibootmgr', 'iwd', 'ly', 'sddm', 'sddm-kcm', 'plasma-meta', 'plasma-nm', 'plasma-pa', 'powerdevil', 'kscreen']) }}
+      {%- else -%}
+      {{ raw_managed_system_packages }}
+      {%- endif -%}
+
+- name: Archlinux | Check for previously managed pacman package manifest
+  ansible.builtin.stat:
+    path: /var/lib/ansible_managed_pacman_packages.json
+  register: pacman_manifest_stat
+  when: can_install_packages
+
+- name: Archlinux | Read previous pacman package manifest
+  ansible.builtin.slurp:
+    src: /var/lib/ansible_managed_pacman_packages.json
+  register: previous_pacman_manifest_raw
+  when:
+    - can_install_packages
+    - pacman_manifest_stat.stat is defined
+    - pacman_manifest_stat.stat.exists
+
+- name: Archlinux | Set previous pacman package list
+  ansible.builtin.set_fact:
+    previous_pacman_packages: "{{ (previous_pacman_manifest_raw.content | b64decode | from_json) if (pacman_manifest_stat.stat is defined and pacman_manifest_stat.stat.exists) else [] }}"
+  when: can_install_packages
+
+- name: Archlinux | Calculate packages to auto-remove
+  ansible.builtin.set_fact:
+    packages_to_remove: "{{ (previous_pacman_packages | difference(managed_system_packages)) | difference(['tar', 'util-linux', 'wpa_supplicant', 'zfs-utils', 'base', 'base-devel', 'linux', 'systemd', 'sudo', 'openssh']) }}"
+  when: can_install_packages
+
+- name: Archlinux | Auto-remove packages no longer listed in system_packages
+  become: true
+  community.general.pacman:
+    name: "{{ packages_to_remove }}"
+    state: absent
+  when:
+    - can_install_packages
+    - packages_to_remove is defined
+    - packages_to_remove | length > 0
+
+- name: Archlinux | Install Arch pacman packages
+  become: true
+  community.general.pacman:
+    name: "{{ managed_system_packages }}"
+    state: present
+    update_cache: true
+  when:
+    - can_install_packages
+    - managed_system_packages | length > 0
+
+- name: Archlinux | Save updated pacman package manifest
+  become: true
+  ansible.builtin.copy:
+    content: "{{ managed_system_packages | to_nice_json }}"
+    dest: /var/lib/ansible_managed_pacman_packages.json
+    mode: '0644'
+  when: can_install_packages
+
+- name: Archlinux | Ensure target user has passwordless sudo for pacman (required for paru)
+  become: true
+  ansible.builtin.copy:
+    content: "{{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
+    dest: /etc/sudoers.d/99-ansible-aur-pacman
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when: can_install_packages
+
+- name: Archlinux | Check whether paru binary is functional
+  ansible.builtin.command:
+    cmd: paru --version
+  register: paru_check
+  failed_when: false
+  changed_when: false
+
+# ------------------------------------------------------------------------------
+# Paru Bootstrap & AUR Management
+# ------------------------------------------------------------------------------
+- name: Archlinux | Bootstrap paru from AUR if missing
+  when:
+    - can_install_packages
+    - paru_check.rc != 0
+  block:
+    - name: Ensure base-devel and git are installed for building AUR packages
+      become: true
+      community.general.pacman:
+        name:
+          - base-devel
+          - git
+        state: present
+
+    - name: Create temporary build directory for paru
+      ansible.builtin.file:
+        path: /tmp/paru-build
+        state: directory
+        owner: "{{ target_user }}"
+        mode: '0755'
+
+    - name: Clone paru repository from AUR
+      become: true
+      become_user: "{{ target_user }}"
+      ansible.builtin.git:
+        repo: https://aur.archlinux.org/paru.git
+        dest: /tmp/paru-build
+        update: true
+
+    - name: Build paru package
+      become: true
+      become_user: "{{ target_user }}"
+      ansible.builtin.command:
+        cmd: makepkg -sf --noconfirm --skippgpcheck
+        chdir: /tmp/paru-build
+
+    - name: Install built paru package via pacman
+      become: true
+      ansible.builtin.shell: |
+        pacman -U --noconfirm --overwrite '*' /tmp/paru-build/*.pkg.tar.zst
+
+    - name: Clean up temporary paru build directory
+      ansible.builtin.file:
+        path: /tmp/paru-build
+        state: absent
+
+- name: Archlinux | Verify paru binary after potential bootstrap
+  ansible.builtin.command:
+    cmd: paru --version
+  register: paru_binary_stat
+  failed_when: false
+  changed_when: false
+
+- name: Archlinux | Check for previously managed AUR package manifest
+  ansible.builtin.stat:
+    path: /var/lib/ansible_managed_aur_packages.json
+  register: aur_manifest_stat
+  when:
+    - can_install_packages
+    - paru_binary_stat.rc == 0
+
+- name: Archlinux | Read previous AUR package manifest
+  ansible.builtin.slurp:
+    src: /var/lib/ansible_managed_aur_packages.json
+  register: previous_aur_manifest_raw
+  when:
+    - can_install_packages
+    - aur_manifest_stat.stat is defined
+    - aur_manifest_stat.stat.exists
+
+- name: Archlinux | Set previous AUR package list
+  ansible.builtin.set_fact:
+    previous_aur_packages: "{{ (previous_aur_manifest_raw.content | b64decode | from_json) if (aur_manifest_stat.stat is defined and aur_manifest_stat.stat.exists) else [] }}"
+  when:
+    - can_install_packages
+    - paru_binary_stat.rc == 0
+
+- name: Archlinux | Calculate AUR packages to auto-remove
+  ansible.builtin.set_fact:
+    aur_packages_to_remove: "{{ previous_aur_packages | difference(managed_aur_packages) }}"
+  when:
+    - can_install_packages
+    - paru_binary_stat.rc == 0
+
+- name: Archlinux | Auto-remove AUR packages no longer listed
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: "paru -Rns --noconfirm {{ aur_packages_to_remove | join(' ') }}"
+  register: paru_remove_result
+  failed_when: paru_remove_result.rc != 0 and "target not found" not in (paru_remove_result.stderr | lower)
+  when:
+    - can_install_packages
+    - paru_binary_stat.rc == 0
+    - aur_packages_to_remove is defined
+    - aur_packages_to_remove | length > 0
+
+- name: Archlinux | Install AUR packages with paru
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: "paru -S --noconfirm --needed {{ managed_aur_packages | join(' ') }}"
+  when:
+    - can_install_packages
+    - paru_binary_stat.rc == 0
+    - managed_aur_packages | length > 0
+
+- name: Archlinux | Save updated AUR package manifest
+  become: true
+  ansible.builtin.copy:
+    content: "{{ managed_aur_packages | to_nice_json }}"
+    dest: /var/lib/ansible_managed_aur_packages.json
+    mode: '0644'
+  when:
+    - can_install_packages
+    - paru_binary_stat.rc == 0

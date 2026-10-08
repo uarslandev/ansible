@@ -1,6 +1,30 @@
 ---
-- name: Ensure user local bin directory exists
+- name: Ensure user directories exist
   ansible.builtin.file:
-    path: "{{ user_bin }}"
+    path: "{{ item }}"
     state: directory
+    owner: "{{ target_user }}"
     mode: '0755'
+  loop:
+    - "{{ user_home }}/.local"
+    - "{{ user_bin }}"
+    - "{{ user_home }}/.config"
+    - "{{ user_home }}/.local/share"
+
+- name: Common | Check if zsh binary is installed
+  ansible.builtin.command: which zsh
+  register: common_zsh_bin
+  changed_when: false
+  failed_when: false
+
+- name: Common | Ensure default shell is set to zsh
+  become: true
+  ansible.builtin.user:
+    name: "{{ target_user }}"
+    shell: "{{ common_zsh_bin.stdout }}"
+  when:
+    - can_become | default(false)
+    - common_zsh_bin.rc == 0
+    - common_zsh_bin.stdout is defined
+    - common_zsh_bin.stdout | length > 0
+  failed_when: false

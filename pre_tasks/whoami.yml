@@ -1,0 +1,33 @@
+---
+- name: Determine current non-root host user
+  ansible.builtin.set_fact:
+    target_user: >-
+      {%- if target_user is defined and target_user | length > 0 -%}
+      {{ target_user }}
+      {%- elif ansible_env.SUDO_USER is defined and ansible_env.SUDO_USER | length > 0 -%}
+      {{ ansible_env.SUDO_USER }}
+      {%- elif ansible_user_id is defined and ansible_user_id != 'root' -%}
+      {{ ansible_user_id }}
+      {%- elif ansible_env.USER is defined and ansible_env.USER != 'root' -%}
+      {{ ansible_env.USER }}
+      {%- elif ansible_env.LOGNAME is defined and ansible_env.LOGNAME != 'root' -%}
+      {{ ansible_env.LOGNAME }}
+      {%- else -%}
+      user
+      {%- endif -%}
+  tags:
+    - always
+
+- name: Set user home and bin paths
+  ansible.builtin.set_fact:
+    user_home: "/home/{{ target_user }}"
+    user_bin: "/home/{{ target_user }}/.local/bin"
+    host_user: "{{ target_user }}"
+  tags:
+    - always
+
+- name: Show detected target user
+  ansible.builtin.debug:
+    msg: "Target User: '{{ target_user }}', Home: '{{ user_home }}', Bin: '{{ user_bin }}'"
+  tags:
+    - always

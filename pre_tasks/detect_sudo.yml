@@ -1,0 +1,58 @@
+---
+- name: Initialize sudo and privilege facts
+  ansible.builtin.set_fact:
+    has_sudo: false
+    can_become: false
+    can_install_packages: false
+    detected_package_manager: ""
+  tags:
+    - always
+
+- name: Identify package manager based on distribution
+  ansible.builtin.set_fact:
+    detected_package_manager: >-
+      {%- if ansible_facts['distribution'] == 'Archlinux' -%}
+      pacman
+      {%- elif ansible_facts['distribution'] in ['Ubuntu', 'Debian'] -%}
+      apt
+      {%- elif ansible_facts['distribution'] in ['Fedora', 'RedHat', 'CentOS', 'Rocky', 'AlmaLinux'] -%}
+      dnf
+      {%- else -%}
+      unknown
+      {%- endif -%}
+  tags:
+    - always
+
+- name: Test passwordless sudo
+  ansible.builtin.command: sudo -n true
+  register: sudo_nopass_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags:
+    - always
+
+- name: Detect if become password is provided
+  ansible.builtin.set_fact:
+    become_pass_provided: >-
+      {{ ((ansible_become_password | default(ansible_become_pass | default(''))) | string | length) > 0 }}
+  tags:
+    - always
+
+- name: Set privilege escalation capability facts
+  ansible.builtin.set_fact:
+    has_sudo: "{{ sudo_nopass_check.rc == 0 or become_pass_provided }}"
+    can_become: "{{ sudo_nopass_check.rc == 0 or become_pass_provided }}"
+    can_install_packages: >-
+      {{ (sudo_nopass_check.rc == 0 or become_pass_provided) and detected_package_manager != 'unknown' }}
+  tags:
+    - always
+
+- name: Show privilege escalation status
+  ansible.builtin.debug:
+    msg: >-
+      Package Manager: '{{ detected_package_manager }}' |
+      Can Install Packages: {{ can_install_packages }} |
+      Passwordless Sudo: {{ sudo_nopass_check.rc == 0 }}
+  tags:
+    - always

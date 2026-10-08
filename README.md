@@ -1,147 +1,178 @@
-# Infrastructure & Workstation Automation (Ansible Monorepo)
+# Dotfiles & Multi-OS Infrastructure Automation
 
-A production-grade Ansible monorepo designed to provision and maintain **minimal Arch Linux and WSL developer environments** with full reproducibility, following modern **DevOps paradigms**.
+A production-grade, multi-distribution automation repository designed to provision, bootstrap, and maintain development environments and dotfiles across **Arch Linux**, **WSL (Windows Subsystem for Linux)**, **Fedora VMs**, and **Ubuntu / Debian**.
 
 ---
 
-## 🏗️ Architecture
+## ⚡ Instant Setup (One-Command)
+
+Run this single command in a terminal on **any fresh system** (Arch, WSL, Fedora VM, or Ubuntu):
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/uarslandev/ansible/main/bin/dotfiles)"
+```
+
+### What this command does automatically:
+1. **Detects the OS & Environment**: Identifies Arch Linux, WSL, Fedora, or Ubuntu/Debian.
+2. **Bootstraps Prerequisites**: Automatically installs `ansible`, `git`, `python3`, and `chezmoi` via the native package manager (`pacman`, `dnf`, or `apt`).
+3. **Clones Repository**: Clones this configuration repository to `~/.dotfiles`.
+4. **Installs Galaxy Requirements**: Pulls required Ansible collections (`community.general`, `kubernetes.core`).
+5. **Applies Dotfiles & Tools**: Executes [`main.yml`](file:///home/user/ansible/main.yml) on localhost to install developer packages and apply your dotfiles from [`uarslandev/dotfiles.git`](https://github.com/uarslandev/dotfiles.git).
+6. **Exposes the `dotfiles` CLI**: Symlinks `dotfiles` to `~/.local/bin/dotfiles` so you can update and re-sync your environment anytime by simply running `dotfiles`.
+
+---
+
+## 📦 Alternative: Clone & Run
+
+If you prefer to clone the repository manually before running:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/uarslandev/ansible.git ~/.dotfiles
+cd ~/.dotfiles
+
+# 2. Run the bootstrap runner
+./bin/dotfiles
+```
+
+---
+
+## 💻 Supported Environments
+
+| Environment | Supported Features | Package Manager | Desktop Services |
+| :--- | :--- | :--- | :--- |
+| **Arch Linux** (Bare-metal) | Pacman + Paru (AUR), Sway/Plasma, Ly DM, `pkgSync` | `pacman` + `paru` | Enabled |
+| **WSL** (Windows Subsystem) | Fast CLI stack, Zsh, Neovim, Tmux, DevOps tools, Dotfiles | Native (`apt`/`dnf`/`pacman`) | Auto-skipped |
+| **Fedora VM** / Host | Modern CLI dev stack, Chezmoi, Starship, Fastfetch, Dotfiles | `dnf` | Tailored |
+| **Ubuntu / Debian** | Build-essential, CLI dev stack, Chezmoi, Starship, Dotfiles | `apt` | Tailored |
+
+---
+
+## 🏗️ Repository Structure
 
 ```
 .
-├── ansible.cfg              # Default Ansible runtime configuration
-├── inventory.ini            # Infrastructure directory (localhost, workstations, servers)
-├── site.yml                 # Master playbook orchestrating all roles
-├── workstation.yml          # Shared workstation playbook imported by each host
-├── pc.yml                   # Entry point for the local pc workstation
-├── group_vars/              # Variables scoped by host groups
-│   ├── all.yml              # Global settings (user home, dotfiles repo, bin path)
-│   ├── workstations.yml     # Minimal Arch package set and tool versions
-│   └── servers.yml          # Server node variables
-├── host_vars/               # Machine-specific variables
-│   └── pc.yml               # Packages unique to pc
-└── roles/                   # Modular automation roles
-    ├── common/              # Base setup (~/.local/bin)
-    ├── workstation/         # Arch pacman CLI tools, sway/ly desktop, and paru bootstrap
-    ├── devops_tools/        # Kubernetes (kubectl, helm, k9s, kind) & Terraform
-    └── dotfiles/            # Chezmoi dotfiles initialization & directory scaffolding
+├── bin/
+│   ├── dotfiles                 # Universal bootstrap CLI (supports curl | bash and local runs)
+│   └── bootstrap -> dotfiles    # Symlink alias for bootstrapping
+├── pre_tasks/                   # Multi-OS detection & normalization
+│   ├── normalize_distribution.yml # Normalizes CachyOS/EndeavourOS -> Archlinux, Debian -> Ubuntu
+│   ├── detect_wsl.yml           # Identifies WSL environment
+│   ├── detect_session.yml       # Identifies desktop vs wsl vs headless/server session
+│   ├── detect_sudo.yml          # Non-blocking privilege and package manager detection
+│   ├── whoami.yml               # Resolves target non-root user and home directory
+│   └── whoami_wsl.yml           # Resolves Windows host user in WSL
+├── requirements/
+│   └── common.yml               # Ansible Galaxy collections (community.general, kubernetes.core)
+├── main.yml                     # Universal entrypoint (runs pre_tasks + dynamic roles on localhost)
+├── ansible.cfg                  # Non-blocking configuration (become_ask_pass = False)
+├── inventory.ini                # Inventory (localhost, workstations, wsl, vms, servers)
+├── group_vars/
+│   ├── all.yml                  # Global pipeline, role exclude filters, and Ubuntu/Fedora packages
+│   ├── workstations.yml         # Arch Linux package definitions (pkgSync compatible)
+│   └── servers.yml              # Server node variables
+├── host_vars/
+│   ├── pc.yml                   # Machine-specific packages (e.g. NVIDIA drivers)
+│   └── thinkpad.yml             # Machine-specific packages (e.g. ZFS tools)
+├── scripts/
+│   ├── pkgSync                  # Arch Linux package synchronization utility
+│   └── tmux-sessionizer         # Tmux session manager script
+└── roles/
+    ├── common/                  # Scaffolds ~/.local/bin, ~/.config, ~/.local/share
+    ├── workstation/
+    │   ├── tasks/main.yml       # Dispatches to distro tasks; guards desktop services
+    │   ├── tasks/Archlinux.yml  # Pacman + paru + pkgSync (with WSL/VM hardware filtering)
+    │   ├── tasks/Ubuntu.yml     # Apt packages + starship installer
+    │   └── tasks/Fedora.yml     # Dnf packages (starship, fastfetch, chezmoi native)
+    ├── devops_tools/            # Docker group & devops CLI tools (kubectl, helm, k9s, kind, terraform)
+    └── dotfiles/                # Auto-installs chezmoi on any OS and applies dotfiles repo
 ```
 
 ---
 
-## 🛠️ Included DevOps Stack
+## 📂 Managing Dotfiles Always from Here
 
-- **Desktop Session**: `ly` display manager + `sway` Wayland compositor + `i3status`
-- **Kubernetes Ecosystem**: `kubectl`, `helm`, `k9s`, `kind`
-- **Infrastructure as Code**: `terraform`
-- **CLI Development**: `neovim`, `tmux`, `zsh`, `git`, `ripgrep`, `fzf`, `btop`, `fastfetch`
-- **Dotfiles Engine**: `chezmoi`
-- **AUR Helper**: `paru`
+Dotfiles are managed via **[Chezmoi](https://www.chezmoi.io/)** backed by [`https://github.com/uarslandev/dotfiles.git`](https://github.com/uarslandev/dotfiles.git).
 
----
+### 1. Auto-apply Across All Systems
+Running `dotfiles` or `ansible-playbook main.yml --tags dotfiles` ensures `chezmoi` is installed and runs `chezmoi apply --force` to synchronize:
+- `~/.zshrc`
+- `~/.tmux.conf`
+- `~/.gitconfig`
+- `~/.config/nvim/`
+- `~/.config/sway/`
+- `~/.config/waybar/`
+- `~/.local/bin/tmux-sessionizer`
 
-## 🚀 Quickstart Guide
-
-### 1. Run Local Provisioning (Arch Linux / WSL)
-
-Execute the host-specific playbook:
+### 2. Modifying Dotfiles
+To edit, test, and push dotfiles from any of your machines:
 
 ```bash
-ansible-playbook pc.yml --ask-become-pass
+# 1. Edit a dotfile:
+chezmoi edit ~/.zshrc
+chezmoi edit ~/.config/nvim/init.lua
+
+# 2. Inspect changes:
+chezmoi diff
+
+# 3. Commit and push to GitHub:
+chezmoi cd
+git commit -am "feat: update zsh config"
+git push origin main
 ```
 
-> **Note:** `--ask-become-pass` prompts for your `sudo` password to perform pacman package installations cleanly.
+Running `dotfiles` on any other machine will immediately pull and apply those changes.
 
-### 2. Selective Execution (Tags / Limit)
+### 3. Adding New Config Files
+```bash
+chezmoi add ~/.config/new-app/config.yml
+chezmoi cd
+git add .
+git commit -m "feat: track new-app config"
+git push origin main
+```
 
-Run only the DevOps CLI tools setup (no sudo needed):
+---
+
+## 🎯 Selective Execution (Tags)
+
+Run only specific parts of your configuration anytime:
 
 ```bash
-ansible-playbook site.yml --tags devops
+# Sync dotfiles only:
+dotfiles --tags dotfiles
+# Or: ansible-playbook main.yml --tags dotfiles
+
+# Run only DevOps tools setup:
+dotfiles --tags devops
+# Or: ansible-playbook main.yml --tags devops
+
+# Run only base workstation packages:
+dotfiles --tags workstation
+# Or: ansible-playbook main.yml --tags workstation
+
+# Run only directory scaffolding:
+dotfiles --tags common
+# Or: ansible-playbook main.yml --tags common
 ```
 
-Run the shared configuration for every workstation:
+---
+
+## 📦 Arch Linux Package Synchronization (`pkgSync`)
+
+On Arch Linux workstations, two-way package synchronization between your installed system packages and Ansible is handled via `pkgSync`:
 
 ```bash
-ansible-playbook -i inventory.ini site.yml --limit workstations --ask-become-pass
+# Check package drift between system and workstations.yml:
+pkgSync
+
+# Update group_vars/workstations.yml to match installed system packages:
+pkgSync --apply
+
+# Interactively review package changes:
+pkgSync --interactive
+
+# Add or remove packages:
+pkgSync --add spotify
+pkgSync --remove foot
 ```
-
-### Add another workstation
-
-1. Add its hostname to `[workstations]` in `inventory.ini`.
-2. Create `host_vars/<hostname>.yml` with `host_system_packages` and/or
-   `host_aur_packages`. These are added to the shared lists in
-   `group_vars/workstations.yml`.
-3. Create `<hostname>.yml` containing the same `import_playbook: workstation.yml`
-   pattern as `pc.yml`, with `target_hosts` set to the hostname.
-4. Run `ansible-playbook <hostname>.yml --ask-become-pass`.
-
----
-
-## 📂 Dotfiles Management with Chezmoi
-
-1. **Track a configuration file:**
-   ```bash
-   chezmoi add ~/.config/nvim
-   chezmoi add ~/.tmux.conf
-   chezmoi add ~/.zshrc
-   ```
-
-2. **Commit and sync dotfiles:**
-   ```bash
-   chezmoi cd
-   git remote add origin git@github.com:YOUR_USERNAME/dotfiles.git
-   git push -u origin main
-   ```
-
-3. **Auto-apply on fresh machine:**
-   Update `dotfiles_repo` in `group_vars/all.yml` with your repository URL. Running `ansible-playbook site.yml` will automatically initialize and apply your dotfiles!
-
----
-
-## 📦 Package Management & Synchronization (`pkgSync`)
-
-This setup features two-way package synchronization between Arch Linux and Ansible:
-
-1. **Ansible -> System (Playbook Execution)**:
-   - Running `ansible-playbook pc.yml` installs the shared packages in `group_vars/workstations.yml` plus packages in `host_vars/pc.yml`.
-   - Any package removed from `system_packages` or `aur_packages` is automatically uninstalled from Arch Linux.
-   - `paru` is automatically bootstrapped if not present on the system.
-
-2. **System -> Ansible (`pkgSync` CLI Tool)**:
-   - Shared packages live in `group_vars/workstations.yml`. The audit on a host also merges its `host_vars/<hostname>.yml` (read-only) so device-specific packages aren't reported as "new".
-   - New packages are written to the **shared** config by default. Use `--host <name>` to route a package to one device's `host_vars/<name>.yml` instead (e.g. NVIDIA drivers on a specific machine).
-
-   ```bash
-   # Audit on the current host (device-specific packages shown read-only)
-   pkgSync
-
-   # Add new packages to the shared workstations.yml (default)
-   pkgSync --apply
-   pkgSync --add spotify
-
-   # Route packages to a specific device's host_vars file instead
-   pkgSync --host pc --apply
-   pkgSync --host pc --add nvidia-dkms
-   pkgSync --host pc --remove foot
-   ```
-
-3. **Playbook Package Audit**:
-   ```bash
-   ansible-playbook sync.yml
-   ```
-
----
-
-## 🖥️ Expanding to Home Server / Remote Nodes
-
-To manage remote Linux servers or laptops:
-
-1. Add target IPs into `inventory.ini` under `[servers]`:
-   ```ini
-   [servers]
-   homeserver.local ansible_host=192.168.1.100 ansible_user=root
-   ```
-2. Run the playbook against the server target:
-   ```bash
-   ansible-playbook site.yml --limit servers
-   ```

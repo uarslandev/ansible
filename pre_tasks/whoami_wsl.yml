@@ -1,0 +1,29 @@
+---
+- name: Check if powershell.exe is available in WSL
+  ansible.builtin.command: which powershell.exe
+  register: ps_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags:
+    - always
+
+- name: Detect Windows User in WSL
+  ansible.builtin.shell:
+    cmd: powershell.exe -NoProfile -Command '$env:UserName'
+  register: windows_user_raw
+  changed_when: false
+  failed_when: false
+  when: ps_check.rc == 0
+  tags:
+    - always
+
+- name: Register Windows WSL host user
+  ansible.builtin.set_fact:
+    wsl_windows_user: "{{ windows_user_raw.stdout | trim }}"
+  when:
+    - ps_check.rc == 0
+    - windows_user_raw.stdout is defined
+    - windows_user_raw.stdout | trim | length > 0
+  tags:
+    - always

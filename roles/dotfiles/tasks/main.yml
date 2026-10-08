@@ -1,14 +1,109 @@
 ---
-- name: Ensure Neovim config directory exists
+# ==============================================================================
+# Dotfiles Management Role (Chezmoi multi-platform automation)
+# ==============================================================================
+
+- name: Dotfiles | Check if chezmoi binary exists in PATH
+  ansible.builtin.command: which chezmoi
+  register: chezmoi_path_check
+  changed_when: false
+  failed_when: false
+  environment:
+    PATH: "{{ user_bin }}:{{ ansible_facts['env']['PATH'] | default('/usr/local/bin:/usr/bin:/bin') }}"
+
+# ------------------------------------------------------------------------------
+# Ensure Chezmoi Installation across all distributions
+# ------------------------------------------------------------------------------
+- name: Dotfiles | Install chezmoi if missing
+  when: chezmoi_path_check.rc != 0
+  block:
+    - name: Dotfiles | Install chezmoi via pacman (Arch Linux)
+      become: true
+      community.general.pacman:
+        name: chezmoi
+        state: present
+      when:
+        - ansible_facts['distribution'] == 'Archlinux'
+        - can_install_packages | default(false)
+
+    - name: Dotfiles | Install chezmoi via dnf (Fedora)
+      become: true
+      ansible.builtin.dnf:
+        name: chezmoi
+        state: present
+      when:
+        - ansible_facts['distribution'] == 'Fedora'
+        - can_install_packages | default(false)
+
+    - name: Dotfiles | Verify if chezmoi is now available via system packages
+      ansible.builtin.command: which chezmoi
+      register: chezmoi_recheck
+      changed_when: false
+      failed_when: false
+      environment:
+        PATH: "{{ user_bin }}:{{ ansible_facts['env']['PATH'] | default('/usr/local/bin:/usr/bin:/bin') }}"
+
+    - name: Dotfiles | Install chezmoi standalone binary via official installer
+      ansible.builtin.shell: |
+        curl -fsSL https://get.chezmoi.io | sh -s -- -b "{{ user_bin }}"
+      args:
+        creates: "{{ user_bin }}/chezmoi"
+      when: chezmoi_recheck.rc != 0
+
+# ------------------------------------------------------------------------------
+# Directory Pre-requisites & Dotfiles Application
+# ------------------------------------------------------------------------------
+- name: Dotfiles | Ensure Neovim config directory exists
   ansible.builtin.file:
     path: "{{ user_home }}/.config/nvim"
     state: directory
+    owner: "{{ target_user }}"
     mode: '0755'
 
-- name: Initialize Chezmoi with dotfiles repository if defined
+- name: Dotfiles | Check if local chezmoi source repository exists
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.local/share/chezmoi"
+  register: chezmoi_repo_stat
+
+- name: Dotfiles | Initialize Chezmoi with dotfiles repository
+  become: true
+  become_user: "{{ target_user }}"
   ansible.builtin.command:
     cmd: "chezmoi init --apply {{ dotfiles_repo }}"
-  when: dotfiles_repo is defined and dotfiles_repo | length > 0
+  environment:
+    PATH: "{{ user_bin }}:{{ ansible_facts['env']['PATH'] | default('/usr/local/bin:/usr/bin:/bin') }}"
+  when:
+    - dotfiles_repo is defined
+    - dotfiles_repo | length > 0
+    - not chezmoi_repo_stat.stat.exists
   register: chezmoi_init_result
   changed_when: chezmoi_init_result.rc == 0
   failed_when: false
+
+- name: Dotfiles | Apply latest Chezmoi dotfiles if repository already exists
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: "chezmoi apply --force"
+  environment:
+    PATH: "{{ user_bin }}:{{ ansible_facts['env']['PATH'] | default('/usr/local/bin:/usr/bin:/bin') }}"
+  when:
+    - chezmoi_repo_stat.stat.exists
+  register: chezmoi_apply_result
+  changed_when: chezmoi_apply_result.rc == 0
+  failed_when: false
+
+- name: Dotfiles | Query Chezmoi managed files
+  become: true
+  become_user: "{{ target_user }}"
+  ansible.builtin.command:
+    cmd: "chezmoi managed"
+  environment:
+    PATH: "{{ user_bin }}:{{ ansible_facts['env']['PATH'] | default('/usr/local/bin:/usr/bin:/bin') }}"
+  register: chezmoi_managed_files
+  changed_when: false
+  failed_when: false
+
+- name: Dotfiles | Display Chezmoi status
+  ansible.builtin.debug:
+    msg: "Chezmoi dotfiles configured! Currently managing {{ (chezmoi_managed_files.stdout_lines | default([])) | length }} files from '{{ dotfiles_repo }}'."

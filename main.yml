@@ -1,0 +1,74 @@
+---
+# ==============================================================================
+# Master Infrastructure & Dotfiles Playbook
+# Rebuilt to support Arch Linux, WSL, Fedora VM, Ubuntu, etc.
+# ==============================================================================
+
+- name: Infrastructure & Dotfiles Automation
+  hosts: "{{ target_hosts | default('localhost') }}"
+  connection: "{{ 'local' if (target_hosts | default('localhost') in ['localhost', 'pc', 'thinkpad', 'wsl', '127.0.0.1']) else omit }}"
+
+  module_defaults:
+    community.general.pacman:
+      extra_args: "{{ arch_pacman_extra_args | default('') }}"
+      update_cache_extra_args: "{{ arch_pacman_update_cache_extra_args | default('') }}"
+      upgrade_extra_args: "{{ arch_pacman_upgrade_extra_args | default('') }}"
+
+  pre_tasks:
+    - name: PreTasks | Normalize Distribution
+      ansible.builtin.import_tasks: pre_tasks/normalize_distribution.yml
+      tags:
+        - always
+
+    - name: PreTasks | Detect WSL
+      ansible.builtin.import_tasks: pre_tasks/detect_wsl.yml
+      tags:
+        - always
+
+    - name: PreTasks | Detect Session & Environment
+      ansible.builtin.import_tasks: pre_tasks/detect_session.yml
+      tags:
+        - always
+
+    - name: PreTasks | Detect Host User
+      ansible.builtin.import_tasks: pre_tasks/whoami.yml
+      tags:
+        - always
+
+    - name: PreTasks | Detect Windows Host User (WSL)
+      ansible.builtin.import_tasks: pre_tasks/whoami_wsl.yml
+      when: ansible_host_environment_is_wsl
+      tags:
+        - always
+
+    - name: PreTasks | Detect Sudo & Privileges
+      ansible.builtin.import_tasks: pre_tasks/detect_sudo.yml
+      tags:
+        - always
+
+  tasks:
+    - name: Core | Calculate active roles to run
+      ansible.builtin.set_fact:
+        run_roles: >-
+          {%- set distro_exclude_roles = (exclude_roles_by_distribution | default({})).get(ansible_facts['distribution'], []) -%}
+          {%- set session_exclude_roles = (exclude_roles_by_session | default({})).get(dotfiles_session | default('default'), []) -%}
+          {%- set default_excluded_roles = (exclude_roles | default([])) + distro_exclude_roles + session_exclude_roles -%}
+          {%- if ansible_run_tags | list == ['all'] -%}
+          {{ default_roles | reject('in', default_excluded_roles) | list }}{%- else -%}
+          {%- set selected_defaults = default_roles | select('in', ansible_run_tags) | list -%}
+          {%- set selected_extra = ansible_run_tags | reject('in', default_roles) | reject('equalto', 'all') | list -%}
+          {{ (selected_defaults + selected_extra) | reject('in', session_exclude_roles) | list }}{%- endif -%}
+      tags:
+        - always
+
+    - name: Core | Execute active roles
+      ansible.builtin.include_role:
+        name: "{{ roles_item }}"
+        apply:
+          tags:
+            - "{{ roles_item }}"
+      loop_control:
+        loop_var: roles_item
+      with_items: "{{ run_roles }}"
+      tags:
+        - always

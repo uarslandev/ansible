@@ -1,0 +1,44 @@
+---
+# ==============================================================================
+# Ubuntu & Debian Workstation Tasks (apt)
+# ==============================================================================
+
+- name: Ubuntu | Update apt cache
+  become: true
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: can_install_packages
+
+- name: Ubuntu | Install core workstation CLI packages
+  become: true
+  ansible.builtin.apt:
+    name: "{{ ubuntu_system_packages }}"
+    state: present
+  when:
+    - can_install_packages
+    - ubuntu_system_packages is defined
+
+- name: Ubuntu | Ensure fd symlink exists
+  become: true
+  ansible.builtin.file:
+    src: /usr/bin/fdfind
+    dest: /usr/local/bin/fd
+    state: link
+    force: false
+  when:
+    - can_install_packages
+  failed_when: false
+
+- name: Ubuntu | Check if starship is installed
+  ansible.builtin.command: which starship
+  register: starship_check
+  changed_when: false
+  failed_when: false
+
+- name: Ubuntu | Install starship prompt binary if missing
+  ansible.builtin.shell: |
+    curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b {{ user_bin }}
+  args:
+    creates: "{{ user_bin }}/starship"
+  when: starship_check.rc != 0
